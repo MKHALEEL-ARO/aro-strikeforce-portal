@@ -1743,7 +1743,17 @@ function getFiltered(accts) {
   }).filter(a => {
     if(!search) return true;
     const s = search.toLowerCase();
-    return a.customer.toLowerCase().includes(s) || a.id.toLowerCase().includes(s) || (a.job||'').toLowerCase().includes(s) || (a.jobId||'').toLowerCase().includes(s);
+    return a.customer.toLowerCase().includes(s)
+        || a.id.toLowerCase().includes(s)
+        || (a.job||'').toLowerCase().includes(s)
+        || (a.jobId||'').toLowerCase().includes(s)
+        || (a.ref||'').toLowerCase().includes(s)
+        || (a.memo||'').toLowerCase().includes(s)
+        || (a.state||'').toLowerCase().includes(s)
+        || (a.arCode||'').toLowerCase().includes(s)
+        || (a.jobStatus||'').toLowerCase().includes(s)
+        || (a.insurance||'').toLowerCase().includes(s)
+        || (a.inv||'').toLowerCase().includes(s);
   });
 }
 
