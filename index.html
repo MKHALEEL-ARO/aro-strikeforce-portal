@@ -938,6 +938,7 @@ const DataLayer = {
   },
   saveUsers(users) {
     try { localStorage.setItem('aro_users_v2', JSON.stringify(users)); } catch(e) {}
+    if (typeof writeUsersToFolder === 'function') writeUsersToFolder(null).catch(() => {});
   },
   getBonus() {
     try { return JSON.parse(localStorage.getItem('aro_bonus_v1') || 'null') || {...BONUS_SEED}; } catch(e) { return {...BONUS_SEED}; }
@@ -1423,6 +1424,19 @@ async function findAndLoadFiles(dirHandle) {
     if (lastLoaded) lastLoaded.textContent = '📁 ' + arEntry.name + '  |  Last updated: ' + fileModStr + '  |  Loaded at ' + loadedStr;
     if (statusBar)  statusBar.style.display = 'flex';
 
+    // Load shared user list from folder (so added users are visible on all browsers)
+    const userEntry = allEntries.find(e => e.name === 'portal_users.json');
+    if (userEntry) {
+      try {
+        const uf   = await userEntry.getFile();
+        const data = JSON.parse(await uf.text());
+        if (data.users && data.users.length) {
+          USERS = data.users;
+          try { localStorage.setItem('aro_users_v2', JSON.stringify(USERS)); } catch(e) {}
+        }
+      } catch(e) { console.warn('Could not load portal_users.json:', e); }
+    }
+
     // Write notes to folder for audit trail
     await writeNotesToFolder(dirHandle);
 
@@ -1471,6 +1485,19 @@ async function writeNotesToFolder(dirHandle) {
     await csvW.close();
   } catch(e) {
     console.warn('writeNotesToFolder error:', e);
+  }
+}
+
+async function writeUsersToFolder(dirHandle) {
+  if (!dirHandle) { dirHandle = DATA_DIR_HANDLE; }
+  if (!dirHandle) return;
+  try {
+    const fh = await dirHandle.getFileHandle('portal_users.json', { create: true });
+    const w  = await fh.createWritable();
+    await w.write(JSON.stringify({ exportedAt: new Date().toISOString(), users: USERS }, null, 2));
+    await w.close();
+  } catch(e) {
+    console.warn('writeUsersToFolder error:', e);
   }
 }
 
