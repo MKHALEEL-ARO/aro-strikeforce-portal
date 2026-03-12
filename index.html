@@ -249,9 +249,9 @@ body{font-family:'Barlow',sans-serif;background:var(--ice);color:var(--text);min
 .csv-banner-btn:hover{background:var(--royal);}
 
 /* ── TWO-COL LAYOUT ── */
-.two-col{display:flex;gap:18px;align-items:flex-start;}
-.col-main{flex:1;min-width:0;overflow-x:auto;}
-.col-side{width:450px;flex-shrink:0;position:sticky;top:120px;max-height:calc(100vh - 140px);overflow-y:auto;}
+.two-col{display:flex;gap:18px;align-items:stretch;height:calc(100vh - 300px);min-height:400px;}
+.col-main{flex:1;min-width:0;overflow-x:auto;overflow-y:auto;}
+.col-side{width:450px;flex-shrink:0;overflow-y:auto;overflow-x:hidden;}
 
 /* ── ACCOUNTS TABLE ── */
 .acct-table{width:1560px;table-layout:fixed;border-collapse:separate;border-spacing:0 5px;}
@@ -259,6 +259,7 @@ body{font-family:'Barlow',sans-serif;background:var(--ice);color:var(--text);min
   font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;
   color:var(--muted);padding:0 12px 6px;text-align:left;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  position:sticky;top:0;z-index:2;background:var(--ice);
 }
 /* Column widths */
 .acct-table th:nth-child(1)  {width:220px;}  /* Customer     */
