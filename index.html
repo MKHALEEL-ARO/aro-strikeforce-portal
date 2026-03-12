@@ -603,7 +603,9 @@ body{font-family:'Titillium Web',Arial,sans-serif;background:var(--ice);color:va
       </div>
       <div id="dash-import-bar" style="display:none;margin-top:-6px;margin-bottom:10px;padding:8px 14px;background:rgba(0,71,159,0.04);border:1px dashed rgba(0,71,159,0.2);border-radius:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <span style="font-size:12px;font-weight:700;letter-spacing:1px;color:var(--muted)">🔗 DASH ENRICHMENT</span>
-        <span id="dash-status" style="font-size:12px;color:var(--muted)">Loading DASH data…</span>
+        <span id="dash-status" style="font-size:12px;color:var(--muted)">No DASH data loaded</span>
+        <button onclick="pickDASHFolder()" style="margin-left:auto;padding:4px 12px;font-size:12px;font-weight:700;letter-spacing:.5px;border-radius:20px;border:1px solid rgba(0,71,159,0.35);background:rgba(0,71,159,0.07);color:var(--royal);cursor:pointer;">📂 Select DASH Folder</button>
+        <button id="dash-reload-btn" onclick="reloadDASHFolder()" style="display:none;padding:4px 12px;font-size:12px;font-weight:700;letter-spacing:.5px;border-radius:20px;border:1px solid rgba(0,71,159,0.35);background:rgba(0,71,159,0.07);color:var(--royal);cursor:pointer;">↺ Reload</button>
       </div>
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
         <div style="display:flex;align-items:center;gap:12px;">
@@ -1662,54 +1664,148 @@ function showReconToast(s, openCt) {
 }
 
 // ══ DASH ENRICHMENT IMPORT ══
+
+// Columns that identify a file as a DASH report
+const DASH_REQUIRED_COLS = ['Job Number', 'Job ID'];
+const DASH_SIGNAL_COLS   = ['Insurance Carrier', 'Claim Number', 'Primary Adjuster', 'Provider Name'];
+
+let _dashFolderHandle = null; // remember for reload
+
+function isDASHHeader(headerLine) {
+  return DASH_REQUIRED_COLS.every(c => headerLine.includes(c)) &&
+         DASH_SIGNAL_COLS.some(c => headerLine.includes(c));
+}
+
+// ── Folder picker ──
+async function pickDASHFolder() {
+  try {
+    const dirHandle = await window.showDirectoryPicker({ mode: 'read' });
+    _dashFolderHandle = dirHandle;
+    document.getElementById('dash-reload-btn').style.display = '';
+    await loadDASHFolder(dirHandle);
+  } catch (e) {
+    if (e.name !== 'AbortError') showToast('Could not open DASH folder: ' + e.message, false);
+  }
+}
+
+async function reloadDASHFolder() {
+  if (!_dashFolderHandle) return pickDASHFolder();
+  await loadDASHFolder(_dashFolderHandle);
+}
+
+// ── Scan folder, read every DASH CSV, merge into DASH_MAP ──
+async function loadDASHFolder(dirHandle) {
+  const statusEl = document.getElementById('dash-status');
+  if (statusEl) statusEl.innerHTML = '<span style="color:var(--muted)">Scanning DASH folder…</span>';
+
+  DASH_MAP = {}; // fresh merge across all files in this folder
+  let fileCount = 0, totalRecords = 0;
+  const errors = [];
+
+  for await (const entry of dirHandle.values()) {
+    if (entry.kind !== 'file') continue;
+    if (!entry.name.toLowerCase().endsWith('.csv')) continue;
+
+    try {
+      const file = await entry.getFile();
+      // Peek header to confirm it's a DASH file
+      const peek = await file.slice(0, 1024).text();
+      const headerLine = peek.split('\n')[0];
+      if (!isDASHHeader(headerLine)) continue; // not a DASH file — skip silently
+
+      const fullText = await file.text();
+      const added = await parseDASHFileIntoMap(fullText, entry.name);
+      fileCount++;
+      totalRecords += added;
+    } catch (e) {
+      errors.push(entry.name);
+    }
+  }
+
+  if (fileCount === 0) {
+    if (statusEl) statusEl.innerHTML = '<span style="color:var(--red)">⚠ No DASH files found in that folder. Make sure the CSVs have Job Number & Job ID columns.</span>';
+    showToast('No DASH files detected in folder', false);
+    return;
+  }
+
+  const arMatched = ACCOUNTS.filter(a => DASH_MAP[a.jobId] || DASH_MAP[a.dashId]).length;
+  if (statusEl) {
+    statusEl.innerHTML = `<span style="color:var(--green)">✅ ${fileCount} file${fileCount>1?'s':''} · ${totalRecords.toLocaleString()} records · <strong>${arMatched} AR invoices enriched</strong></span>` +
+      (errors.length ? ` <span style="color:var(--red);font-size:11px">(${errors.length} file${errors.length>1?'s':''} skipped)</span>` : '');
+  }
+  showToast(`✅ DASH: ${fileCount} files, ${arMatched} invoices matched`);
+  if (selectedAccount) renderNotePanel();
+}
+
+// ── Parse one DASH CSV and merge rows into shared DASH_MAP; returns record count ──
+function parseDASHFileIntoMap(csvText, filename) {
+  return new Promise((resolve, reject) => {
+    Papa.parse(csvText, {
+      header: true,
+      skipEmptyLines: true,
+      complete: (results) => {
+        let added = 0;
+        results.data.forEach(row => {
+          const carrier = (row['Insurance Carrier'] || row['Insurance Company'] || '').trim();
+          const entry = {
+            carrier:       carrier === 'null' ? '' : carrier,
+            carrierId:     row['Insurance Carrier ID']   || '',
+            claimId:       row['Claim ID']               || '',
+            claimNumber:   row['Claim Number']           || '',
+            adjuster:      row['Primary Adjuster']       || row['Adjuster'] || '',
+            adjusterEmail: row['Primary Adjuster Email'] || row['Adjuster Email'] || '',
+            providerName:  row['Provider Name']          || filename.replace('.csv','')
+          };
+          // Normalise "null" strings from DASH export
+          Object.keys(entry).forEach(k => { if (entry[k] === 'null') entry[k] = ''; });
+
+          const jobNum = (row['Job Number'] || '').toString().trim();
+          const jobId  = (row['Job ID']     || '').toString().trim();
+          // Only write if the incoming entry has MORE data than what's already stored
+          const hasData = entry.carrier || entry.claimNumber || entry.adjuster || entry.adjusterEmail;
+          const existing = DASH_MAP[jobNum];
+          const existingHasData = existing && (existing.carrier || existing.claimNumber || existing.adjuster);
+          if (jobNum && (hasData || !existingHasData)) {
+            DASH_MAP[jobNum] = entry; added++;
+          } else if (jobNum && !DASH_MAP[jobNum]) {
+            DASH_MAP[jobNum] = entry; added++;
+          }
+          if (jobId && jobId !== jobNum && !DASH_MAP[jobId]) {
+            DASH_MAP[jobId] = entry; // fallback key only if not already present
+          }
+        });
+        resolve(added);
+      },
+      error: reject
+    });
+  });
+}
+
+// Legacy single-file handler (kept for backward compat with the AR folder auto-detect path)
 function handleDASHFile(file) {
   if (!file) return;
   const reader = new FileReader();
-  reader.onload = e => parseDASHText(e.target.result);
+  reader.onload = async e => {
+    DASH_MAP = {};
+    const added = await parseDASHFileIntoMap(e.target.result, file.name);
+    const arMatched = ACCOUNTS.filter(a => DASH_MAP[a.jobId] || DASH_MAP[a.dashId]).length;
+    const statusEl = document.getElementById('dash-status');
+    if (statusEl) statusEl.innerHTML = `<span style="color:var(--green)">✅ ${added.toLocaleString()} records · <strong>${arMatched} AR invoices enriched</strong></span>`;
+    showToast(`✅ DASH loaded: ${arMatched} invoices matched`);
+    if (selectedAccount) renderNotePanel();
+  };
   reader.readAsText(file);
 }
 
-function parseDASHText(csvText) {
-  Papa.parse(csvText, {
-    header: true,
-    skipEmptyLines: true,
-    complete: (results) => {
-      DASH_MAP = {};
-      let matched = 0;
-      results.data.forEach(row => {
-        // DASH columns: Provider Name, Job Number, Job ID, Insurance Carrier,
-        //               Insurance Carrier ID, Claim ID, Claim Number,
-        //               Primary Adjuster, Primary Adjuster Email
-        // Key on BOTH Job Number (alphanumeric, matches AR "Job ID") AND
-        // numeric Job ID (matches AR "DASH ID") to maximise coverage.
-        const entry = {
-          carrier:       row['Insurance Carrier']       || row['Insurance Company'] || '',
-          carrierId:     row['Insurance Carrier ID']    || '',
-          claimId:       row['Claim ID']                || '',
-          claimNumber:   row['Claim Number']            || '',
-          adjuster:      row['Primary Adjuster']        || row['Adjuster']         || '',
-          adjusterEmail: row['Primary Adjuster Email']  || row['Adjuster Email']   || '',
-          providerName:  row['Provider Name']           || ''
-        };
-        const jobNum = (row['Job Number'] || '').toString().trim();
-        const jobId  = (row['Job ID']     || '').toString().trim();
-        if (jobNum) { DASH_MAP[jobNum] = entry; matched++; }
-        if (jobId && jobId !== jobNum) DASH_MAP[jobId] = entry;  // fallback key
-      });
-      // Match: AR "Job ID" → DASH "Job Number" (primary), AR "DASH ID" → DASH "Job ID" (fallback)
-      const arMatched = ACCOUNTS.filter(a => DASH_MAP[a.jobId] || DASH_MAP[a.dashId]).length;
-      const statusEl = document.getElementById('dash-status');
-      if (statusEl) {
-        statusEl.innerHTML = `<span style="color:var(--green)">✅ ${matched.toLocaleString()} DASH records loaded · <strong>${arMatched} AR invoices enriched</strong></span>`;
-      }
-      showToast(`✅ DASH loaded: ${arMatched} of ${ACCOUNTS.length} invoices matched`);
-      // Re-render note panel if an account is selected (to show enrichment immediately)
-      if (selectedAccount) renderNotePanel();
-    },
-    error: (err) => {
-      showToast('Error parsing DASH CSV: ' + err.message, false);
-    }
-  });
+// Keep parseDASHText for the single-file AR-folder auto-detect path
+async function parseDASHText(csvText) {
+  DASH_MAP = {};
+  const added = await parseDASHFileIntoMap(csvText, 'dash.csv');
+  const arMatched = ACCOUNTS.filter(a => DASH_MAP[a.jobId] || DASH_MAP[a.dashId]).length;
+  const statusEl = document.getElementById('dash-status');
+  if (statusEl) statusEl.innerHTML = `<span style="color:var(--green)">✅ ${added.toLocaleString()} records · <strong>${arMatched} AR invoices enriched</strong></span>`;
+  showToast(`✅ DASH loaded: ${arMatched} invoices matched`);
+  if (selectedAccount) renderNotePanel();
 }
 
 // ══ ACCOUNTS PAGE ══
