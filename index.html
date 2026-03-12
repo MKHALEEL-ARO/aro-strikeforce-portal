@@ -1884,9 +1884,9 @@ function renderNotePanel(){
     <div style="margin-bottom:12px;padding:10px 14px;background:rgba(154,98,0,0.06);border:1px solid rgba(154,98,0,0.2);border-radius:8px">
       <div style="font-size:12px;font-weight:800;letter-spacing:1.5px;color:#7A4E00;margin-bottom:6px">⚡ PARTIAL PAYMENT RECEIVED</div>
       <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px">
-        <span>Paid: <strong style="color:#0A8A5F">${fmt(a.totalPaid||0)}</strong></span>
-        <span>Remaining: <strong style="color:var(--red)">${fmt(a.balance)}</strong></span>
-        <span>Original: <strong>${fmt(a.totalAmount)}</strong></span>
+        <span>Paid: <strong style="color:#0A8A5F">${fmtCents(a.totalPaid||0)}</strong></span>
+        <span>Remaining: <strong style="color:var(--red)">${fmtCents(a.balance)}</strong></span>
+        <span>Original: <strong>${fmtCents(a.totalAmount)}</strong></span>
       </div>
       <div style="height:6px;background:rgba(0,0,0,0.08);border-radius:3px;overflow:hidden">
         <div style="height:100%;width:${pct}%;background:#0A8A5F;border-radius:3px;transition:width 0.4s"></div>
@@ -1922,7 +1922,7 @@ function renderNotePanel(){
 
   document.getElementById('note-content').innerHTML=`
     <div class="sel-name">${a.customer}</div>
-    <div class="sel-meta">${a.job || a.jobId} · ${fmt(a.balance)} · ${d>0?d+' days past due':'Current'}</div>
+    <div class="sel-meta">${a.job || a.jobId} · ${fmtCents(a.balance)} · ${d>0?d+' days past due':'Current'}</div>
     ${(a.phone||a.email) ? `<div style="display:flex;gap:14px;flex-wrap:wrap;margin:-6px 0 12px;">${a.phone?`<a href="tel:${a.phone}" style="font-size:12px;font-weight:600;color:var(--royal);text-decoration:none">📱 ${a.phone}</a>`:''} ${a.email?`<a href="mailto:${a.email}" style="font-size:12px;font-weight:600;color:var(--royal);text-decoration:none;word-break:break-all">✉ ${a.email}</a>`:''}</div>` : ''}
     ${arCodeRow}
     ${detailGrid}
@@ -1991,7 +1991,7 @@ function renderNotePanel(){
           <div class="ne-hdr"><div class="ne-who">${n.by}</div><div class="ne-date">${n.date}</div></div>
           <div class="ne-method">${n.method}${n.claim?` · <span style="font-size:12px;font-weight:700;padding:1px 7px;border-radius:10px;background:${n.claim==='Quick Pay Discount'?'#fff3cd;color:#856404':n.claim==='Collected – Full'?'rgba(10,138,95,0.12);color:var(--green)':'rgba(10,15,51,0.07);color:var(--muted)'}">${n.claim}</span>`:''}</div>
           <div class="ne-text">${n.notes||'(no notes)'}</div>
-          ${n.committedAmount>0?`<div style="margin-top:5px;font-size:12px;font-weight:700;color:var(--royal);background:rgba(0,71,159,0.07);padding:3px 8px;border-radius:6px;display:inline-block">💰 Committed: ${fmt(n.committedAmount)}${n.committedDate?' by '+n.committedDate:''}</div>`:''}
+          ${n.committedAmount>0?`<div style="margin-top:5px;font-size:12px;font-weight:700;color:var(--royal);background:rgba(0,71,159,0.07);padding:3px 8px;border-radius:6px;display:inline-block">💰 Committed: ${fmtCents(n.committedAmount)}${n.committedDate?' by '+n.committedDate:''}</div>`:''}
           ${n.litigation?`<div style="margin-top:5px;font-size:12px;font-weight:800;color:#b43c00;background:rgba(180,60,0,0.08);padding:2px 8px;border-radius:6px;display:inline-block">⚖ IN LITIGATION</div>`:''}
           ${n.action?`<div class="ne-action">→ ${n.action}</div>`:''}
         </div>`;
@@ -2290,7 +2290,8 @@ function deleteNote(acctId, origIdx){
 // ══ UTILITIES ══
 function isAdmin() { return currentUser && currentUser.role === 'admin'; }
 function isController() { return currentUser && (currentUser.role === 'controller' || currentUser.role === 'admin'); }
-function fmt(n) { return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:0,maximumFractionDigits:0}).format(n); }
+function fmt(n)      { return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:0,maximumFractionDigits:0}).format(n); }
+function fmtCents(n) { return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:2}).format(n); }
 function daysAged(dateStr) { const due=new Date(dateStr); return Math.floor((new Date()-due)/(1000*60*60*24)); }
 function ageLbl(d) {
   if(d<=30)  return '0–30d';
