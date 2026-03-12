@@ -1535,8 +1535,10 @@ function parseARText(csvText) {
           dashId:        (obj['Dash ID'] || obj['DASH ID'] || obj['Job ID'] || obj['Job'] || '').toString().trim(), // DASH match key
           dateFullyPaid: dateFullyPaid,
           invoiceDate:   obj['Date'] || '',
-          arCode:        obj['AR Code']    || '',            // e.g. "Payment plan"
+          arCode:        obj['AR Code']    || '',
           jobStatus:     obj['Job status'] || '',
+          state:         obj['State']      || '',
+          memo:          obj['Memo']       || '',
           phone:         obj['Primary phone'] || '',
           email:         obj['Primary email address'] || '',
           payStatus:     payStatus                           // 'open' | 'partial' | 'paid'
@@ -1835,6 +1837,27 @@ function renderNotePanel(){
     </div>` : '';
   const arCodeRow  = a.arCode ? `<div style="margin-bottom:8px"><span style="font-size:10px;font-weight:700;letter-spacing:1px;padding:2px 8px;border-radius:10px;background:rgba(13,36,97,0.07);color:var(--muted)">${a.arCode}</span></div>` : '';
 
+  // Invoice details grid — ref, job status, state, ar code, memo
+  const detailFields = [
+    a.ref        ? { label: 'Reference #',  val: `<span style="font-family:'JetBrains Mono',monospace">${a.ref}</span>` } : null,
+    a.jobStatus  ? { label: 'Job Status',   val: a.jobStatus } : null,
+    a.state      ? { label: 'State',        val: a.state } : null,
+    a.arCode     ? { label: 'AR Code',      val: a.arCode } : null,
+    a.invoiceDate? { label: 'Invoice Date', val: a.invoiceDate } : null,
+  ].filter(Boolean);
+  const detailGrid = detailFields.length ? `
+    <div style="margin-bottom:12px;padding:10px 14px;background:rgba(12,61,92,0.03);border:1px solid rgba(12,61,92,0.1);border-radius:10px">
+      <div style="font-size:10px;font-weight:800;letter-spacing:1.5px;color:var(--navy);margin-bottom:8px">📋 INVOICE DETAILS</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;font-size:12px">
+        ${detailFields.map(f=>`<div><span style="color:var(--muted);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;display:block">${f.label}</span><span style="font-weight:600">${f.val}</span></div>`).join('')}
+      </div>
+      ${a.memo ? `<div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(12,61,92,0.08)"><span style="color:var(--muted);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;display:block;margin-bottom:3px">Memo</span><span style="font-size:12px;line-height:1.5">${a.memo}</span></div>` : ''}
+    </div>` : (a.memo ? `
+    <div style="margin-bottom:12px;padding:10px 14px;background:rgba(12,61,92,0.03);border:1px solid rgba(12,61,92,0.1);border-radius:10px">
+      <div style="font-size:10px;font-weight:800;letter-spacing:1.5px;color:var(--navy);margin-bottom:6px">📋 MEMO</div>
+      <span style="font-size:12px;line-height:1.5">${a.memo}</span>
+    </div>` : '');
+
   // Quick Pay Discount only applies to Paces (E9000), Archer (E12000), Semper Dry (E17000)
   const QUICKPAY_BRANDS = ['E9000', 'E12000', 'E17000'];
   const quickPayEligible = QUICKPAY_BRANDS.includes(a.brand);
@@ -1844,6 +1867,7 @@ function renderNotePanel(){
     <div class="sel-meta">${a.job || a.jobId} · ${fmt(a.balance)} · ${d>0?d+' days past due':'Current'}</div>
     ${(a.phone||a.email) ? `<div style="display:flex;gap:14px;flex-wrap:wrap;margin:-6px 0 12px;">${a.phone?`<a href="tel:${a.phone}" style="font-size:11px;font-weight:600;color:var(--royal);text-decoration:none">📱 ${a.phone}</a>`:''} ${a.email?`<a href="mailto:${a.email}" style="font-size:11px;font-weight:600;color:var(--royal);text-decoration:none;word-break:break-all">✉ ${a.email}</a>`:''}</div>` : ''}
     ${arCodeRow}
+    ${detailGrid}
     ${paidRow}
     ${partialRow}
     ${dashPanel}
