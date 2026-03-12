@@ -249,12 +249,12 @@ body{font-family:'Barlow',sans-serif;background:var(--ice);color:var(--text);min
 .csv-banner-btn:hover{background:var(--royal);}
 
 /* ── TWO-COL LAYOUT ── */
-.two-col{display:flex;gap:18px;}
-.col-main{flex:1;min-width:0;}
-.col-side{width:740px;flex-shrink:0;}
+.two-col{display:flex;gap:18px;align-items:flex-start;}
+.col-main{flex:1;min-width:0;overflow-x:auto;}
+.col-side{width:600px;flex-shrink:0;position:sticky;top:120px;max-height:calc(100vh - 140px);overflow-y:auto;}
 
 /* ── ACCOUNTS TABLE ── */
-.acct-table{width:100%;border-collapse:separate;border-spacing:0 5px;}
+.acct-table{width:max-content;min-width:100%;border-collapse:separate;border-spacing:0 5px;}
 .acct-table thead th{
   font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;
   color:var(--muted);padding:0 12px 6px;text-align:left;
@@ -298,7 +298,7 @@ body{font-family:'Barlow',sans-serif;background:var(--ice);color:var(--text);min
 /* ── NOTE PANEL ── */
 .note-card{
   background:var(--card);border:1px solid var(--border);border-radius:14px;
-  padding:22px;position:sticky;top:120px;box-shadow:var(--shadow);
+  padding:22px;box-shadow:var(--shadow);
 }
 .note-card h3{font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:var(--navy);margin-bottom:4px;}
 .sel-name{font-size:16px;font-weight:600;color:var(--navy);margin-bottom:2px;}
