@@ -268,6 +268,18 @@ body{font-family:'Titillium Web',Arial,sans-serif;background:var(--ice);color:va
   color:var(--muted);padding:0 12px 6px;text-align:left;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
   position:sticky;top:0;z-index:2;background:var(--ice);
+  user-select:none; /* prevent text selection while dragging */
+}
+/* ── COLUMN RESIZE HANDLES ── */
+.col-resize-handle{
+  position:absolute;right:0;top:0;height:100%;width:6px;
+  cursor:col-resize;z-index:5;
+  border-right:2px solid transparent;
+  transition:border-color .15s;
+}
+.col-resize-handle:hover,.col-resize-handle.active{
+  border-right:2px solid var(--royal);
+  background:rgba(0,71,159,0.08);
 }
 /* Column widths */
 .acct-table th:nth-child(1)  {width:140px;}  /* Brand        */
@@ -1047,6 +1059,7 @@ function renderUI(){
     .join('');
 
   renderAccountsPage();
+  setTimeout(initResizableColumns, 0); // defer so sticky thead is fully painted
   renderLeaderboard();
   renderUserPage();
   updateCountdown();
@@ -2322,6 +2335,38 @@ function showToast(msg,ok=true) {
 }
 
 renderBrandCheckboxes();
+
+// ══ RESIZABLE COLUMNS ══
+function initResizableColumns(){
+  const tbl = document.querySelector('#page-accounts .acct-table');
+  if(!tbl || tbl.dataset.resizable) return;   // run once only
+  tbl.dataset.resizable = '1';
+  const ths = Array.from(tbl.querySelectorAll('thead th'));
+  ths.forEach(th => {
+    const handle = document.createElement('div');
+    handle.className = 'col-resize-handle';
+    th.appendChild(handle);
+    handle.addEventListener('mousedown', e => {
+      e.preventDefault(); e.stopPropagation();
+      const startX  = e.clientX;
+      const startW  = th.offsetWidth;
+      handle.classList.add('active');
+      const onMove = mv => {
+        const newW = Math.max(40, startW + mv.clientX - startX);
+        th.style.width = newW + 'px';
+        // keep total table width in sync so horizontal scroll works
+        tbl.style.width = ths.reduce((s,t) => s + t.offsetWidth, 0) + 'px';
+      };
+      const onUp = () => {
+        handle.classList.remove('active');
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+  });
+}
 </script>
 </body>
 </html>
