@@ -1654,10 +1654,9 @@ function parseDASHText(csvText) {
         // DASH columns: Provider Name, Job Number, Job ID, Insurance Carrier,
         //               Insurance Carrier ID, Claim ID, Claim Number,
         //               Primary Adjuster, Primary Adjuster Email
-        // Keyed on Sage Job ID (numeric internal ID) for reliable cross-reference with AR export
-        const jobId = (row['Job ID'] || '').toString().trim();
-        if (!jobId) return;
-        DASH_MAP[jobId] = {
+        // Key on BOTH Job Number (alphanumeric, matches AR "Job ID") AND
+        // numeric Job ID (matches AR "DASH ID") to maximise coverage.
+        const entry = {
           carrier:       row['Insurance Carrier']       || row['Insurance Company'] || '',
           carrierId:     row['Insurance Carrier ID']    || '',
           claimId:       row['Claim ID']                || '',
@@ -1666,10 +1665,13 @@ function parseDASHText(csvText) {
           adjusterEmail: row['Primary Adjuster Email']  || row['Adjuster Email']   || '',
           providerName:  row['Provider Name']           || ''
         };
-        matched++;
+        const jobNum = (row['Job Number'] || '').toString().trim();
+        const jobId  = (row['Job ID']     || '').toString().trim();
+        if (jobNum) { DASH_MAP[jobNum] = entry; matched++; }
+        if (jobId && jobId !== jobNum) DASH_MAP[jobId] = entry;  // fallback key
       });
-      // Cross-reference count against loaded AR accounts (matched on AR "Dash ID" → DASH "Job ID")
-      const arMatched = ACCOUNTS.filter(a => a.dashId && DASH_MAP[a.dashId]).length;
+      // Match: AR "Job ID" → DASH "Job Number" (primary), AR "DASH ID" → DASH "Job ID" (fallback)
+      const arMatched = ACCOUNTS.filter(a => DASH_MAP[a.jobId] || DASH_MAP[a.dashId]).length;
       const statusEl = document.getElementById('dash-status');
       if (statusEl) {
         statusEl.innerHTML = `<span style="color:var(--green)">✅ ${matched.toLocaleString()} DASH records loaded · <strong>${arMatched} AR invoices enriched</strong></span>`;
@@ -1853,8 +1855,8 @@ function renderNotePanel(){
   const d = daysAged(a.dueDate);
   const today = new Date().toISOString().split('T')[0];
 
-  // DASH enrichment lookup — AR "Dash ID" field matches DASH file "Job ID"
-  const dash = a.dashId ? (DASH_MAP[a.dashId] || null) : null;
+  // DASH enrichment lookup — primary: AR "Job ID" → DASH "Job Number"; fallback: AR "DASH ID" → DASH "Job ID"
+  const dash = DASH_MAP[a.jobId] || DASH_MAP[a.dashId] || null;
 
   // Build DASH enrichment panel HTML
   const dashPanel = dash ? `
@@ -1867,7 +1869,7 @@ function renderNotePanel(){
         ${dash.adjusterEmail?`<div><span style="color:var(--muted);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;display:block">Adjuster Email</span><a href="mailto:${dash.adjusterEmail}" style="color:var(--royal);font-weight:600;word-break:break-all">${dash.adjusterEmail}</a></div>`:''}
         ${dash.claimId?`<div><span style="color:var(--muted);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;display:block">Claim ID</span><span style="font-family:'JetBrains Mono',monospace">${dash.claimId}</span></div>`:''}
       </div>
-    </div>` : (Object.keys(DASH_MAP).length > 0 ? `<div style="margin-bottom:10px;font-size:11px;color:var(--muted);padding:6px 10px;background:rgba(0,0,0,0.02);border-radius:6px">🔗 No DASH match for Dash ID: <code>${a.dashId || '(none)'}</code></div>` : '');
+    </div>` : (Object.keys(DASH_MAP).length > 0 ? `<div style="margin-bottom:10px;font-size:11px;color:var(--muted);padding:6px 10px;background:rgba(0,0,0,0.02);border-radius:6px">🔗 No DASH match for Job ID: <code>${a.jobId || a.dashId || '(none)'}</code></div>` : '');
 
   // Payment status rows — Sage-sourced data
   const paidRow    = a.dateFullyPaid ? `<div style="margin-bottom:10px;font-size:12px;color:var(--green);padding:6px 12px;background:rgba(10,138,95,0.06);border-radius:6px">✅ Collected in Full: <strong>${a.dateFullyPaid}</strong></div>` : '';
