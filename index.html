@@ -262,7 +262,7 @@ body{font-family:'Titillium Web',Arial,sans-serif;background:var(--ice);color:va
 .col-side{width:450px;flex-shrink:0;overflow-y:auto;overflow-x:hidden;}
 
 /* ── ACCOUNTS TABLE ── */
-.acct-table{width:1560px;table-layout:fixed;border-collapse:separate;border-spacing:0 5px;}
+.acct-table{width:1700px;table-layout:fixed;border-collapse:separate;border-spacing:0 5px;}
 .acct-table thead th{
   font-size:12px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;
   color:var(--muted);padding:0 12px 6px;text-align:left;
@@ -270,18 +270,19 @@ body{font-family:'Titillium Web',Arial,sans-serif;background:var(--ice);color:va
   position:sticky;top:0;z-index:2;background:var(--ice);
 }
 /* Column widths */
-.acct-table th:nth-child(1)  {width:220px;}  /* Customer     */
-.acct-table th:nth-child(2)  {width:105px;}  /* Due Date     */
-.acct-table th:nth-child(3)  {width: 85px;}  /* Age          */
-.acct-table th:nth-child(4)  {width:115px;}  /* Balance Due  */
-.acct-table th:nth-child(5)  {width: 80px;}  /* State        */
-.acct-table th:nth-child(6)  {width:155px;}  /* Job Status   */
-.acct-table th:nth-child(7)  {width:155px;}  /* AR Code      */
-.acct-table th:nth-child(8)  {width:190px;}  /* Memo         */
-.acct-table th:nth-child(9)  {width:105px;}  /* Invoice Date */
-.acct-table th:nth-child(10) {width:150px;}  /* Insurance    */
-.acct-table th:nth-child(11) {width: 75px;}  /* Bonus        */
-.acct-table th:nth-child(12) {width:125px;}  /* Status       */
+.acct-table th:nth-child(1)  {width:140px;}  /* Brand        */
+.acct-table th:nth-child(2)  {width:210px;}  /* Customer     */
+.acct-table th:nth-child(3)  {width:105px;}  /* Due Date     */
+.acct-table th:nth-child(4)  {width: 85px;}  /* Age          */
+.acct-table th:nth-child(5)  {width:115px;}  /* Balance Due  */
+.acct-table th:nth-child(6)  {width: 80px;}  /* State        */
+.acct-table th:nth-child(7)  {width:155px;}  /* Job Status   */
+.acct-table th:nth-child(8)  {width:155px;}  /* AR Code      */
+.acct-table th:nth-child(9)  {width:190px;}  /* Memo         */
+.acct-table th:nth-child(10) {width:105px;}  /* Invoice Date */
+.acct-table th:nth-child(11) {width:150px;}  /* Insurance    */
+.acct-table th:nth-child(12) {width: 75px;}  /* Bonus        */
+.acct-table th:nth-child(13) {width:125px;}  /* Status       */
 .acct-row{background:var(--card);cursor:pointer;transition:all .2s;animation:fadeUp .3s ease both;}
 .acct-row:hover{background:#ddf2f5;transform:translateX(2px);}
 .acct-row.selected{background:#c5eaee;border-left:3px solid var(--royal);}
@@ -291,8 +292,8 @@ body{font-family:'Titillium Web',Arial,sans-serif;background:var(--ice);color:va
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   max-width:0; /* forces table-layout:fixed to clip content to column width */
 }
-.acct-row td:first-child{overflow:visible;white-space:normal;} /* Customer col wraps */
 .acct-row td:first-child{border-left:1px solid var(--border);border-radius:10px 0 0 10px;}
+.acct-row td:nth-child(2){overflow:visible;white-space:normal;} /* Customer col wraps */
 .acct-row td:last-child{border-right:1px solid var(--border);border-radius:0 10px 10px 0;}
 .cust-name{font-weight:600;color:var(--navy);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .cust-meta{font-size:13px;color:var(--muted);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
@@ -614,7 +615,7 @@ body{font-family:'Titillium Web',Arial,sans-serif;background:var(--ice);color:va
       <div class="col-main">
         <table class="acct-table">
           <thead><tr>
-            <th>Customer</th><th>Due Date</th><th>Age</th><th>Balance Due</th>
+            <th>Brand</th><th>Customer</th><th>Due Date</th><th>Age</th><th>Balance Due</th>
             <th>State</th><th>Job Status</th><th>AR Code</th><th>Memo</th><th>Invoice Date</th>
             <th>Insurance</th>
             <th id="bonus-col-hdr" style="display:none">Bonus</th><th>Status</th>
@@ -1743,7 +1744,9 @@ function renderAccountsPage(){
     const selCls = selectedAccount && selectedAccount.id === a.id ? ' selected' : '';
     const trunc = (str, n) => str && str.length > n ? str.substring(0, n) + '…' : (str || '—');
     const esc   = str => (str||'').replace(/"/g,'&quot;');
+    const bname1 = BRANDS.find(b => b.id === a.brand)?.name || a.brand || '—';
     return `<tr class="acct-row${selCls}" onclick="selectAccount(this,'${a.id}')">
+      <td style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(bname1)}">${trunc(bname1,20)}</td>
       <td><div class="cust-name">${a.customer}${woNote}${litNote}</div><div class="cust-meta">${a.job || a.jobId || ''}</div>${contactLine}</td>
       <td style="font-size:13px;white-space:nowrap">${a.dueDate || '—'}</td>
       <td><span class="age-badge ${ageCls(d)}">${ageLbl(d)}</span></td>
@@ -1829,7 +1832,9 @@ function renderAccounts(){
     const selCls = selectedAccount && selectedAccount.id === a.id ? ' selected' : '';
     const trunc = (str, n) => str && str.length > n ? str.substring(0, n) + '…' : (str || '—');
     const esc   = str => (str||'').replace(/"/g,'&quot;');
+    const bname2 = BRANDS.find(b => b.id === a.brand)?.name || a.brand || '—';
     return `<tr class="acct-row${selCls}" onclick="selectAccount(this,'${a.id}')">
+      <td style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(bname2)}">${trunc(bname2,20)}</td>
       <td><div class="cust-name">${a.customer}${woNote}${litNote}</div><div class="cust-meta">${a.job || a.jobId || ''}</div>${contactLine}</td>
       <td style="font-size:13px;white-space:nowrap">${a.dueDate || '—'}</td>
       <td><span class="age-badge ${ageCls(d)}">${ageLbl(d)}</span></td>
