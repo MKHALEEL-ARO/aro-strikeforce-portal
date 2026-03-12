@@ -1346,32 +1346,55 @@ async function findAndLoadFiles(dirHandle) {
   if (sub) sub.textContent = 'Scanning data folder…';
   _showOL('loading');
 
+  // AR files are identified by column structure — any CSV with these columns qualifies
+  const AR_REQUIRED_COLS = new Set(['Record number','Record type','Total due','Due date','Total amount']);
+  const AR_SKIP_PREFIXES = ['audit_','brand list','daily briefing','ar_snapshot'];
+
+  async function peekIsARFile(fileHandle) {
+    const n = fileHandle.name.toLowerCase();
+    if (!n.endsWith('.csv')) return false;
+    if (AR_SKIP_PREFIXES.some(p => n.startsWith(p))) return false;
+    try {
+      const f = await fileHandle.getFile();
+      // Read only first 2KB to check headers
+      const slice = f.slice(0, 2048);
+      const text = await slice.text();
+      const header = text.split('\n')[0];
+      return [...AR_REQUIRED_COLS].every(col => header.includes(col));
+    } catch { return false; }
+  }
+
   try {
-    let arEntry = null, arMod = 0, arYearLock = false, dashEntry = null;
-    const curYear = new Date().getFullYear().toString();
+    let arEntry = null, dashEntry = null;
+    // First pass: collect all entries
+    const allEntries = [];
     for await (const entry of dirHandle.values()) {
-      if (entry.kind !== 'file') continue;
-      const n = entry.name.toLowerCase();
-      // AR file priority: 1) exact "AR_Invoices.csv", 2) current-year summary, 3) most-recently-modified summary
-      if (n === 'ar_invoices.csv') {
-        arEntry = entry; arYearLock = true; arMod = Infinity;
-      } else if (!arYearLock && (n.includes('ar transaction summary') || n.includes('ar invoices')) && n.endsWith('.csv')) {
-        const hasYear = entry.name.includes(curYear);
-        const f = await entry.getFile();
-        if (hasYear) {
-          // Always prefer current-year named file
-          if (!arYearLock) { arEntry = entry; arYearLock = true; arMod = f.lastModified; }
-        } else if (!arYearLock && f.lastModified > arMod) {
-          arMod = f.lastModified; arEntry = entry;
+      if (entry.kind === 'file') allEntries.push(entry);
+    }
+
+    // Priority 1: exact ar_invoices.csv (written by morning briefing script — always freshest)
+    const exactAR = allEntries.find(e => e.name.toLowerCase() === 'ar_invoices.csv');
+    if (exactAR) {
+      arEntry = exactAR;
+    } else {
+      // Priority 2: any CSV that has AR column structure — pick most recently modified
+      let bestMod = 0;
+      for (const entry of allEntries) {
+        const isAR = await peekIsARFile(entry);
+        if (isAR) {
+          const f = await entry.getFile();
+          if (f.lastModified > bestMod) { bestMod = f.lastModified; arEntry = entry; }
         }
-      }
-      // DASH / adjuster file
-      if (n === 'dash.csv' || n.includes('job insurance') || n.includes('adjuster')) {
-        dashEntry = entry;
       }
     }
 
-    if (!arEntry) throw new Error('No AR data file found in folder. Expecting "AR transaction summary*.csv" or "AR_Invoices.csv".');
+    // DASH / adjuster file (by name — structure is different)
+    dashEntry = allEntries.find(e => {
+      const n = e.name.toLowerCase();
+      return n === 'dash.csv' || n.includes('job insurance') || n.includes('adjuster');
+    }) || null;
+
+    if (!arEntry) throw new Error('No AR data file found in folder. Add any AR transaction CSV exported from your system.');
 
     if (sub) sub.textContent = 'Reading AR data…';
     const arFileRead = await arEntry.getFile();
