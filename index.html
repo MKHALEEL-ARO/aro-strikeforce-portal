@@ -1970,12 +1970,10 @@ function renderNotePanel(){
     ${notes.length?`<div class="note-hist"><div class="divider"></div><h4>Previous Notes (${notes.length})</h4>
       ${notes.slice().reverse().map((n, revIdx)=>{
         const origIdx = notes.length - 1 - revIdx;
-        const eligible=isBonusEligibleNote(n.date);
-        const prePortal=n.source==='pre-portal'||!eligible;
         const canDelete = isAdmin() || (currentUser && n.by === currentUser.name);
         const delBtn = canDelete ? `<button onclick="deleteNote('${selectedAccount.id}',${origIdx})" title="Delete this note" style="background:none;border:none;cursor:pointer;padding:2px 6px;border-radius:6px;font-size:13px;color:#ccc;transition:all .2s;float:right;line-height:1" onmouseover="this.style.color='var(--red)';this.style.background='rgba(192,57,43,0.08)'" onmouseout="this.style.color='#ccc';this.style.background='none'">🗑</button>` : '';
-        return `<div class="note-entry ${prePortal?'ne-preportal':''}">
-          <div style="margin-bottom:4px;display:flex;justify-content:space-between;align-items:center">${prePortal?'<span class="ne-preportal-tag">⏱ Pre-Portal — Not Bonus Eligible</span>':'<span class="ne-portal-tag">✅ Portal Note</span>'}${delBtn}</div>
+        return `<div class="note-entry">
+          <div style="margin-bottom:4px;display:flex;justify-content:space-between;align-items:center">${delBtn}</div>
           <div class="ne-hdr"><div class="ne-who">${n.by}</div><div class="ne-date">${n.date}</div></div>
           <div class="ne-method">${n.method}${n.claim?` · <span style="font-size:10px;font-weight:700;padding:1px 7px;border-radius:10px;background:${n.claim==='Quick Pay Discount'?'#fff3cd;color:#856404':n.claim==='Collected – Full'?'rgba(10,138,95,0.12);color:var(--green)':'rgba(13,36,97,0.07);color:var(--muted)'}">${n.claim}</span>`:''}</div>
           <div class="ne-text">${n.notes||'(no notes)'}</div>
