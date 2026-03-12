@@ -588,8 +588,9 @@ body{font-family:'Barlow',sans-serif;background:var(--ice);color:var(--text);min
       <div class="col-main">
         <table class="acct-table">
           <thead><tr>
-            <th>Customer</th><th>Invoice</th><th>Due Date</th>
-            <th>Age</th><th>Balance Due</th><th>Insurance</th>
+            <th>Customer</th><th>Due Date</th><th>Age</th><th>Balance Due</th>
+            <th>State</th><th>Job Status</th><th>AR Code</th><th>Memo</th><th>Invoice Date</th>
+            <th>Insurance</th>
             <th id="bonus-col-hdr" style="display:none">Bonus</th><th>Status</th>
           </tr></thead>
           <tbody id="acct-tbody"></tbody>
@@ -1737,12 +1738,18 @@ function renderAccountsPage(){
     const litNote = notes.some(n => n.litigation)    ? '<span class="litigation-flag" style="font-size:9px;margin-left:4px">⚖ LIT</span>' : '';
     const contactLine = (a.phone || a.email) ? `<div class="cust-contact">${a.phone ? `<a href="tel:${a.phone}" onclick="event.stopPropagation()">📱 ${a.phone}</a>` : ''}${a.email ? `<a href="mailto:${a.email}" onclick="event.stopPropagation()">✉ ${a.email}</a>` : ''}</div>` : '';
     const selCls = selectedAccount && selectedAccount.id === a.id ? ' selected' : '';
+    const trunc = (str, n) => str && str.length > n ? str.substring(0, n) + '…' : (str || '—');
+    const esc   = str => (str||'').replace(/"/g,'&quot;');
     return `<tr class="acct-row${selCls}" onclick="selectAccount(this,'${a.id}')">
       <td><div class="cust-name">${a.customer}${woNote}${litNote}</div><div class="cust-meta">${a.job || a.jobId || ''}</div>${contactLine}</td>
-      <td><span style="font-family:'JetBrains Mono',monospace;font-size:11px">${a.id}</span></td>
-      <td style="font-size:12px">${a.dueDate}</td>
+      <td style="font-size:12px;white-space:nowrap">${a.dueDate || '—'}</td>
       <td><span class="age-badge ${ageCls(d)}">${ageLbl(d)}</span></td>
       <td><div class="bal-val">${fmt(a.balance)}</div></td>
+      <td style="font-size:12px;white-space:nowrap">${a.state || '—'}</td>
+      <td style="font-size:11px;max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(a.jobStatus)}">${trunc(a.jobStatus,25)}</td>
+      <td style="font-size:11px;max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(a.arCode)}">${trunc(a.arCode,25)}</td>
+      <td style="font-size:11px;max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(a.memo)}">${trunc(a.memo,45)}</td>
+      <td style="font-size:12px;white-space:nowrap">${a.invoiceDate || '—'}</td>
       <td><span class="ins-tag">${a.insurance ? '<span class="ins-dot"></span>' + a.insurance : '—'}</span></td>
       ${isAdmin() ? `<td>${bnus ? '<span class="bonus-pill">'+bnus+'</span>' : '—'}</td>` : ''}
       <td><span class="rec-tag ${rec.cls}">${rec.status}</span></td>
@@ -1817,12 +1824,18 @@ function renderAccounts(){
     const litNote = notes.some(n => n.litigation)    ? '<span class="litigation-flag" style="font-size:9px;margin-left:4px">⚖ LIT</span>' : '';
     const contactLine = (a.phone || a.email) ? `<div class="cust-contact">${a.phone ? `<a href="tel:${a.phone}" onclick="event.stopPropagation()">📱 ${a.phone}</a>` : ''}${a.email ? `<a href="mailto:${a.email}" onclick="event.stopPropagation()">✉ ${a.email}</a>` : ''}</div>` : '';
     const selCls = selectedAccount && selectedAccount.id === a.id ? ' selected' : '';
+    const trunc = (str, n) => str && str.length > n ? str.substring(0, n) + '…' : (str || '—');
+    const esc   = str => (str||'').replace(/"/g,'&quot;');
     return `<tr class="acct-row${selCls}" onclick="selectAccount(this,'${a.id}')">
       <td><div class="cust-name">${a.customer}${woNote}${litNote}</div><div class="cust-meta">${a.job || a.jobId || ''}</div>${contactLine}</td>
-      <td><span style="font-family:'JetBrains Mono',monospace;font-size:11px">${a.id}</span></td>
-      <td style="font-size:12px">${a.dueDate}</td>
+      <td style="font-size:12px;white-space:nowrap">${a.dueDate || '—'}</td>
       <td><span class="age-badge ${ageCls(d)}">${ageLbl(d)}</span></td>
       <td><div class="bal-val">${fmt(a.balance)}</div></td>
+      <td style="font-size:12px;white-space:nowrap">${a.state || '—'}</td>
+      <td style="font-size:11px;max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(a.jobStatus)}">${trunc(a.jobStatus,25)}</td>
+      <td style="font-size:11px;max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(a.arCode)}">${trunc(a.arCode,25)}</td>
+      <td style="font-size:11px;max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(a.memo)}">${trunc(a.memo,45)}</td>
+      <td style="font-size:12px;white-space:nowrap">${a.invoiceDate || '—'}</td>
       <td><span class="ins-tag">${a.insurance ? '<span class="ins-dot"></span>' + a.insurance : '—'}</span></td>
       ${isAdmin() ? `<td>${bnus ? '<span class="bonus-pill">'+bnus+'</span>' : '—'}</td>` : ''}
       <td><span class="rec-tag ${rec.cls}">${rec.status}</span></td>
