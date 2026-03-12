@@ -1374,8 +1374,8 @@ async function findAndLoadFiles(dirHandle) {
     if (!arEntry) throw new Error('No AR data file found in folder. Expecting "AR transaction summary*.csv" or "AR_Invoices.csv".');
 
     if (sub) sub.textContent = 'Reading AR data…';
-    const arFile = await arEntry.getFile();
-    const arText = await arFile.text();
+    const arFileRead = await arEntry.getFile();
+    const arText = await arFileRead.text();
     parseARText(arText);
 
     if (dashEntry) {
@@ -1387,16 +1387,18 @@ async function findAndLoadFiles(dirHandle) {
       if (statusEl) statusEl.innerHTML = '<span style="color:var(--muted)">No DASH file found in folder</span>';
     }
 
-    // Update status bar
-    const now = new Date();
-    const timeStr = now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
-    const dateStr = now.toLocaleDateString([], {month:'short',day:'numeric'});
-    const dsLabel = document.getElementById('ds-label');
+    // Update status bar — show file's last-modified time so users know how fresh the data is
+    const arFileObj  = await arEntry.getFile();
+    const fileModTs  = new Date(arFileObj.lastModified);
+    const fileModStr = fileModTs.toLocaleDateString([], {month:'short',day:'numeric',year:'numeric'})
+                     + ' at ' + fileModTs.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    const loadedStr  = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    const dsLabel    = document.getElementById('ds-label');
     const lastLoaded = document.getElementById('data-last-loaded');
-    if (dsLabel) dsLabel.textContent = dateStr + ' ' + timeStr;
-    if (lastLoaded) lastLoaded.textContent = 'Folder: ' + dirHandle.name + ' · Loaded ' + timeStr;
-    const statusBar = document.getElementById('data-status-bar');
-    if (statusBar) statusBar.style.display = 'flex';
+    const statusBar  = document.getElementById('data-status-bar');
+    if (dsLabel)    dsLabel.textContent = 'Data: ' + fileModStr;
+    if (lastLoaded) lastLoaded.textContent = '📁 ' + arEntry.name + '  |  Last updated: ' + fileModStr + '  |  Loaded at ' + loadedStr;
+    if (statusBar)  statusBar.style.display = 'flex';
 
     // Write notes to folder for audit trail
     await writeNotesToFolder(dirHandle);
