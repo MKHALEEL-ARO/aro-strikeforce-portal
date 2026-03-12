@@ -2290,7 +2290,7 @@ function deleteNote(acctId, origIdx){
 // ══ UTILITIES ══
 function isAdmin() { return currentUser && currentUser.role === 'admin'; }
 function isController() { return currentUser && (currentUser.role === 'controller' || currentUser.role === 'admin'); }
-function fmt(n) { return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:0}).format(n); }
+function fmt(n) { return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:0,maximumFractionDigits:0}).format(n); }
 function daysAged(dateStr) { const due=new Date(dateStr); return Math.floor((new Date()-due)/(1000*60*60*24)); }
 function ageLbl(d) {
   if(d<=30)  return '0–30d';
