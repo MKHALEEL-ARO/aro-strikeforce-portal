@@ -125,7 +125,7 @@ body{font-family:'Barlow',sans-serif;background:var(--ice);color:var(--text);min
 @keyframes spin{to{transform:rotate(360deg);}}
 .gh-loader-title{font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:800;letter-spacing:2px;color:var(--navy);margin-bottom:8px;}
 .gh-loader-sub{font-size:13px;color:var(--muted);}
-#data-status-bar{display:none;align-items:center;gap:6px;font-size:11px;color:rgba(255,255,255,0.55);}
+#data-status-bar{display:none;align-items:center;gap:6px;font-size:13px;color:rgba(255,255,255,0.55);}
 #data-status-bar .ds-dot{width:7px;height:7px;border-radius:50%;background:#2ecf9a;animation:dspulse 2.5s ease-in-out infinite;}
 @keyframes dspulse{0%,100%{opacity:1;}50%{opacity:0.35;}}
 #btn-refresh-data{
@@ -165,7 +165,7 @@ body{font-family:'Barlow',sans-serif;background:var(--ice);color:var(--text);min
 
 /* ── CUSTOMER CONTACT INFO ── */
 .cust-contact{display:flex;gap:10px;flex-wrap:wrap;margin-top:3px;}
-.cust-contact a{font-size:10px;font-weight:600;color:var(--royal);text-decoration:none;white-space:nowrap;}
+.cust-contact a{font-size:12px;font-weight:600;color:var(--royal);text-decoration:none;white-space:nowrap;}
 .cust-contact a:hover{text-decoration:underline;}
 
 /* ── LITIGATION FLAG ── */
@@ -206,7 +206,7 @@ body{font-family:'Barlow',sans-serif;background:var(--ice);color:var(--text);min
 .sc-royal::before{background:var(--royal);}
 .sc-red::before{background:var(--red);}
 .sc-purple::before{background:#7c5cbf;}
-.stat-lbl{font-size:8px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);margin-bottom:3px;}
+.stat-lbl{font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);margin-bottom:3px;}
 .stat-val{font-family:'Barlow Condensed',sans-serif;font-size:38px;font-weight:900;line-height:1;}
 .sv-gold{color:var(--gold);}
 .sv-green{color:#0a8a5f;}
@@ -223,7 +223,7 @@ body{font-family:'Barlow',sans-serif;background:var(--ice);color:var(--text);min
 /* ── FILTERS ── */
 .filters{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center;}
 .fbtn{
-  padding:6px 14px;border-radius:20px;cursor:pointer;font-size:11px;font-weight:600;
+  padding:6px 14px;border-radius:20px;cursor:pointer;font-size:13px;font-weight:600;
   border:1px solid var(--border);background:var(--white);color:var(--muted);transition:all .2s;
 }
 .fbtn:hover,.fbtn.active{background:var(--royal);border-color:var(--royal);color:#fff;}
@@ -251,27 +251,27 @@ body{font-family:'Barlow',sans-serif;background:var(--ice);color:var(--text);min
 /* ── TWO-COL LAYOUT ── */
 .two-col{display:flex;gap:18px;}
 .col-main{flex:1;min-width:0;}
-.col-side{width:370px;flex-shrink:0;}
+.col-side{width:740px;flex-shrink:0;}
 
 /* ── ACCOUNTS TABLE ── */
 .acct-table{width:100%;border-collapse:separate;border-spacing:0 5px;}
 .acct-table thead th{
-  font-size:9px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;
+  font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;
   color:var(--muted);padding:0 12px 6px;text-align:left;
 }
 .acct-row{background:var(--card);cursor:pointer;transition:all .2s;animation:fadeUp .3s ease both;}
 .acct-row:hover{background:#ddf2f5;transform:translateX(2px);}
 .acct-row.selected{background:#c5eaee;border-left:3px solid var(--royal);}
 .acct-row td{
-  padding:13px 12px;font-size:13px;
+  padding:13px 12px;font-size:14px;
   border-top:1px solid var(--border);border-bottom:1px solid var(--border);
 }
 .acct-row td:first-child{border-left:1px solid var(--border);border-radius:10px 0 0 10px;}
 .acct-row td:last-child{border-right:1px solid var(--border);border-radius:0 10px 10px 0;}
 .cust-name{font-weight:600;color:var(--navy);}
-.cust-meta{font-size:11px;color:var(--muted);margin-top:1px;}
-.bal-val{font-family:'Barlow Condensed',sans-serif;font-size:17px;font-weight:700;}
-.age-badge{display:inline-block;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700;}
+.cust-meta{font-size:13px;color:var(--muted);margin-top:1px;}
+.bal-val{font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:700;}
+.age-badge{display:inline-block;padding:3px 9px;border-radius:20px;font-size:12px;font-weight:700;}
 .ab-30   {background:rgba(245,166,35,0.1); color:#9a6200; border:1px solid rgba(245,166,35,0.3);}
 .ab-60   {background:rgba(200,100,0,0.1);  color:#c85000; border:1px solid rgba(200,100,0,0.3);}
 .ab-90   {background:rgba(204,34,51,0.1);  color:var(--red); border:1px solid rgba(204,34,51,0.3);}
@@ -300,19 +300,19 @@ body{font-family:'Barlow',sans-serif;background:var(--ice);color:var(--text);min
   background:var(--card);border:1px solid var(--border);border-radius:14px;
   padding:22px;position:sticky;top:120px;box-shadow:var(--shadow);
 }
-.note-card h3{font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:var(--navy);margin-bottom:4px;}
-.sel-name{font-size:14px;font-weight:600;color:var(--navy);margin-bottom:2px;}
-.sel-meta{font-size:11px;color:var(--muted);margin-bottom:16px;}
+.note-card h3{font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:var(--navy);margin-bottom:4px;}
+.sel-name{font-size:16px;font-weight:600;color:var(--navy);margin-bottom:2px;}
+.sel-meta{font-size:13px;color:var(--muted);margin-bottom:16px;}
 .logged-as{
   display:flex;align-items:center;gap:8px;background:#e0f5f7;
   border:1px solid rgba(11,122,140,0.2);border-radius:8px;padding:9px 12px;
-  font-size:12px;color:var(--royal);margin-bottom:14px;
+  font-size:14px;color:var(--royal);margin-bottom:14px;
 }
 .frow{margin-bottom:12px;}
-.flbl{display:block;font-size:9px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);margin-bottom:4px;}
+.flbl{display:block;font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);margin-bottom:4px;}
 .finput,.fselect,.ftextarea{
   width:100%;padding:9px 12px;background:#f5f8ff;border:1px solid var(--border);
-  border-radius:8px;color:var(--navy);font-family:'Barlow',sans-serif;font-size:13px;outline:none;transition:border .2s;
+  border-radius:8px;color:var(--navy);font-family:'Barlow',sans-serif;font-size:14px;outline:none;transition:border .2s;
 }
 .finput:focus,.fselect:focus,.ftextarea:focus{border-color:var(--royal);background:#e0f5f7;}
 .fselect option{background:#fff;color:var(--navy);}
@@ -1742,14 +1742,14 @@ function renderAccountsPage(){
     const esc   = str => (str||'').replace(/"/g,'&quot;');
     return `<tr class="acct-row${selCls}" onclick="selectAccount(this,'${a.id}')">
       <td><div class="cust-name">${a.customer}${woNote}${litNote}</div><div class="cust-meta">${a.job || a.jobId || ''}</div>${contactLine}</td>
-      <td style="font-size:12px;white-space:nowrap">${a.dueDate || '—'}</td>
+      <td style="font-size:13px;white-space:nowrap">${a.dueDate || '—'}</td>
       <td><span class="age-badge ${ageCls(d)}">${ageLbl(d)}</span></td>
       <td><div class="bal-val">${fmt(a.balance)}</div></td>
-      <td style="font-size:12px;white-space:nowrap">${a.state || '—'}</td>
-      <td style="font-size:11px;max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(a.jobStatus)}">${trunc(a.jobStatus,25)}</td>
-      <td style="font-size:11px;max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(a.arCode)}">${trunc(a.arCode,25)}</td>
-      <td style="font-size:11px;max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(a.memo)}">${trunc(a.memo,45)}</td>
-      <td style="font-size:12px;white-space:nowrap">${a.invoiceDate || '—'}</td>
+      <td style="font-size:13px;white-space:nowrap">${a.state || '—'}</td>
+      <td style="font-size:13px;max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(a.jobStatus)}">${trunc(a.jobStatus,25)}</td>
+      <td style="font-size:13px;max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(a.arCode)}">${trunc(a.arCode,25)}</td>
+      <td style="font-size:13px;max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(a.memo)}">${trunc(a.memo,45)}</td>
+      <td style="font-size:13px;white-space:nowrap">${a.invoiceDate || '—'}</td>
       <td><span class="ins-tag">${a.insurance ? '<span class="ins-dot"></span>' + a.insurance : '—'}</span></td>
       ${isAdmin() ? `<td>${bnus ? '<span class="bonus-pill">'+bnus+'</span>' : '—'}</td>` : ''}
       <td><span class="rec-tag ${rec.cls}">${rec.status}</span></td>
@@ -1828,14 +1828,14 @@ function renderAccounts(){
     const esc   = str => (str||'').replace(/"/g,'&quot;');
     return `<tr class="acct-row${selCls}" onclick="selectAccount(this,'${a.id}')">
       <td><div class="cust-name">${a.customer}${woNote}${litNote}</div><div class="cust-meta">${a.job || a.jobId || ''}</div>${contactLine}</td>
-      <td style="font-size:12px;white-space:nowrap">${a.dueDate || '—'}</td>
+      <td style="font-size:13px;white-space:nowrap">${a.dueDate || '—'}</td>
       <td><span class="age-badge ${ageCls(d)}">${ageLbl(d)}</span></td>
       <td><div class="bal-val">${fmt(a.balance)}</div></td>
-      <td style="font-size:12px;white-space:nowrap">${a.state || '—'}</td>
-      <td style="font-size:11px;max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(a.jobStatus)}">${trunc(a.jobStatus,25)}</td>
-      <td style="font-size:11px;max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(a.arCode)}">${trunc(a.arCode,25)}</td>
-      <td style="font-size:11px;max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(a.memo)}">${trunc(a.memo,45)}</td>
-      <td style="font-size:12px;white-space:nowrap">${a.invoiceDate || '—'}</td>
+      <td style="font-size:13px;white-space:nowrap">${a.state || '—'}</td>
+      <td style="font-size:13px;max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(a.jobStatus)}">${trunc(a.jobStatus,25)}</td>
+      <td style="font-size:13px;max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(a.arCode)}">${trunc(a.arCode,25)}</td>
+      <td style="font-size:13px;max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(a.memo)}">${trunc(a.memo,45)}</td>
+      <td style="font-size:13px;white-space:nowrap">${a.invoiceDate || '—'}</td>
       <td><span class="ins-tag">${a.insurance ? '<span class="ins-dot"></span>' + a.insurance : '—'}</span></td>
       ${isAdmin() ? `<td>${bnus ? '<span class="bonus-pill">'+bnus+'</span>' : '—'}</td>` : ''}
       <td><span class="rec-tag ${rec.cls}">${rec.status}</span></td>
