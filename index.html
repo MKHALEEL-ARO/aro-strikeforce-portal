@@ -110,6 +110,32 @@ body{font-family:'Barlow',sans-serif;background:var(--ice);color:var(--text);min
 }
 .tb-logout:hover{border-color:#ff8888;color:#ff8888;}
 
+/* ── GITHUB DATA LOADER ── */
+#gh-loading-overlay{
+  position:fixed;top:0;left:0;width:100%;height:100%;
+  background:rgba(12,61,92,0.88);display:flex;align-items:center;
+  justify-content:center;z-index:999;backdrop-filter:blur(4px);
+}
+.gh-loader-box{background:#fff;border-radius:16px;padding:40px 48px;text-align:center;max-width:380px;}
+.gh-spinner{
+  width:48px;height:48px;border:4px solid rgba(12,61,92,0.12);
+  border-top-color:var(--navy);border-radius:50%;
+  animation:spin .9s linear infinite;margin:0 auto 20px;
+}
+@keyframes spin{to{transform:rotate(360deg);}}
+.gh-loader-title{font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:800;letter-spacing:2px;color:var(--navy);margin-bottom:8px;}
+.gh-loader-sub{font-size:13px;color:var(--muted);}
+#data-status-bar{display:none;align-items:center;gap:6px;font-size:11px;color:rgba(255,255,255,0.55);}
+#data-status-bar .ds-dot{width:7px;height:7px;border-radius:50%;background:#2ecf9a;animation:dspulse 2.5s ease-in-out infinite;}
+@keyframes dspulse{0%,100%{opacity:1;}50%{opacity:0.35;}}
+#btn-refresh-data{
+  background:none;border:1px solid rgba(255,255,255,0.18);
+  color:rgba(255,255,255,0.55);padding:3px 9px;border-radius:4px;
+  cursor:pointer;font-size:10px;font-weight:700;letter-spacing:1px;transition:all .2s;
+}
+#btn-refresh-data:hover{border-color:var(--gold-lt);color:var(--gold-lt);}
+#btn-refresh-data:disabled{opacity:0.4;cursor:default;}
+
 /* ── NAV TABS ── */
 .nav-tabs{
   display:flex;gap:2px;padding:0 28px;
@@ -465,7 +491,21 @@ body{font-family:'Barlow',sans-serif;background:var(--ice);color:var(--text);min
         <span id="tb-name"></span>
         <span class="tb-role" id="tb-role-badge"></span>
       </div>
+      <div id="data-status-bar">
+        <div class="ds-dot"></div>
+        <span id="ds-label">Live</span>
+        <button id="btn-refresh-data" onclick="autoLoadFromGitHub(true)" title="Pull latest data from GitHub">↻ REFRESH</button>
+      </div>
       <button class="tb-logout" onclick="doLogout()">Sign Out</button>
+    </div>
+  </div>
+
+  <!-- GitHub data loading overlay -->
+  <div id="gh-loading-overlay" style="display:none">
+    <div class="gh-loader-box">
+      <div class="gh-spinner"></div>
+      <div class="gh-loader-title">LOADING PORTAL DATA</div>
+      <div class="gh-loader-sub" id="gh-loader-sub">Fetching latest AR & DASH data…</div>
     </div>
   </div>
 
@@ -488,27 +528,22 @@ body{font-family:'Barlow',sans-serif;background:var(--ice);color:var(--text);min
     <!-- ══ STICKY HEADER: stats + filters lock above invoice list ══ -->
     <div id="accts-sticky-hdr">
       <div class="stat-grid" id="acct-stats" style="--cols:3"></div>
-      <div id="csv-import-banner" style="display:none;border:2px dashed var(--navy);border-radius:12px;padding:32px;text-align:center;background:rgba(12,61,92,0.02);margin-bottom:12px">
-        <div style="font-size:32px;margin-bottom:8px">📂</div>
-        <div class="csv-banner-title">LOAD SAGE AR EXPORT</div>
-        <div class="csv-banner-subtitle">Drop AR Invoices CSV here or click to browse</div>
-        <button class="csv-banner-btn" onclick="document.getElementById('csv-file-input').click()">BROWSE FILE</button>
-        <input type="file" id="csv-file-input" accept=".csv" style="display:none" onchange="handleCSVFile(this.files[0])">
+      <div id="csv-import-banner" style="display:none;border-radius:10px;padding:20px 24px;text-align:center;background:rgba(12,61,92,0.04);border:1px solid rgba(12,61,92,0.1);margin-bottom:12px">
+        <div class="gh-spinner" style="width:32px;height:32px;border-width:3px;margin-bottom:12px"></div>
+        <div class="csv-banner-title" style="font-size:13px">LOADING DATA FROM GITHUB…</div>
+        <div class="csv-banner-subtitle">Please wait while the latest AR data is fetched.</div>
       </div>
       <div id="dash-import-bar" style="display:none;margin-top:-6px;margin-bottom:10px;padding:8px 14px;background:rgba(11,122,140,0.04);border:1px dashed rgba(11,122,140,0.2);border-radius:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <span style="font-size:12px;font-weight:700;letter-spacing:1px;color:var(--muted)">🔗 DASH ENRICHMENT</span>
-        <span id="dash-status" style="font-size:12px;color:var(--muted)">No DASH file loaded — adjuster & carrier data unavailable</span>
-        <button onclick="document.getElementById('dash-file-input').click()" style="margin-left:auto;padding:5px 14px;background:var(--navy);color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;letter-spacing:1px;cursor:pointer">LOAD DASH CSV</button>
-        <input type="file" id="dash-file-input" accept=".csv" style="display:none" onchange="handleDASHFile(this.files[0])">
+        <span id="dash-status" style="font-size:12px;color:var(--muted)">Loading DASH data…</span>
       </div>
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
         <div style="display:flex;align-items:center;gap:12px;">
           <div class="sec-title">Open Accounts</div>
           <div class="sec-badge" id="acct-count">— accounts</div>
         </div>
-        <div id="csv-reload-link" style="display:none;display:flex;gap:8px">
-          <button class="fbtn" onclick="document.getElementById('csv-file-input').click()" style="margin:0">📂 Load AR CSV</button>
-          <button class="fbtn" onclick="document.getElementById('dash-file-input').click()" style="margin:0;background:rgba(11,122,140,0.05)" title="Load DASH data">🔗 Load DASH</button>
+        <div id="csv-reload-link" style="display:none;align-items:center;gap:8px;font-size:11px;color:var(--muted)">
+          <span id="data-last-loaded"></span>
         </div>
       </div>
       <div class="filters" id="acct-filters">
@@ -924,9 +959,10 @@ function doLogin(){
   user.lastLogin = new Date().toLocaleDateString();
   DataLayer.saveUsers(USERS);
   autoLoadPrePortalNotes();
-  renderUI();
   document.getElementById('login-screen').style.display='none';
   document.getElementById('app').style.display='block';
+  renderUI();
+  autoLoadFromGitHub(false);
 }
 
 function doLogout(){
@@ -1180,10 +1216,76 @@ function renderBrandSummary() {
   document.getElementById('summary-tbody').innerHTML = detailRows.join('');
 }
 
+// ══ GITHUB AUTO-LOADER ══
+const GH_RAW = 'https://raw.githubusercontent.com/MKHALEEL-ARO/aro-strikeforce-portal/main/data/';
+
+async function autoLoadFromGitHub(isManualRefresh) {
+  const overlay = document.getElementById('gh-loading-overlay');
+  const subLabel = document.getElementById('gh-loader-sub');
+  const refreshBtn = document.getElementById('btn-refresh-data');
+  if (refreshBtn) refreshBtn.disabled = true;
+
+  // Show overlay on first load; show toast on manual refresh
+  if (!isManualRefresh) {
+    if (overlay) overlay.style.display = 'flex';
+  } else {
+    showToast('🔄 Refreshing data from GitHub…');
+  }
+
+  try {
+    // Fetch AR and DASH in parallel
+    if (subLabel) subLabel.textContent = 'Fetching AR Invoices…';
+    const [arResp, dashResp] = await Promise.all([
+      fetch(GH_RAW + 'AR_Invoices.csv?t=' + Date.now()),
+      fetch(GH_RAW + 'DASH.csv?t=' + Date.now())
+    ]);
+
+    if (!arResp.ok) throw new Error(`AR file not found (${arResp.status}). Upload AR_Invoices.csv to the GitHub data/ folder.`);
+    const arText = await arResp.text();
+
+    if (subLabel) subLabel.textContent = 'Parsing account data…';
+    parseARText(arText);
+
+    if (dashResp.ok) {
+      const dashText = await dashResp.text();
+      parseDASHText(dashText);
+    } else {
+      const statusEl = document.getElementById('dash-status');
+      if (statusEl) statusEl.innerHTML = '<span style="color:var(--muted)">No DASH.csv found in repo — adjuster data unavailable</span>';
+    }
+
+    // Update status indicators
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    const dateStr = now.toLocaleDateString([], {month:'short',day:'numeric'});
+    const dsLabel = document.getElementById('ds-label');
+    const lastLoaded = document.getElementById('data-last-loaded');
+    const statusBar = document.getElementById('data-status-bar');
+    if (dsLabel) dsLabel.textContent = dateStr + ' ' + timeStr;
+    if (lastLoaded) lastLoaded.textContent = 'Last refreshed: ' + dateStr + ' at ' + timeStr;
+    if (statusBar) statusBar.style.display = 'flex';
+
+  } catch(err) {
+    showToast('⚠️ ' + err.message, false);
+    // Show empty state
+    document.getElementById('csv-import-banner').style.display = 'none';
+    renderAccountsPage();
+  } finally {
+    if (overlay) overlay.style.display = 'none';
+    if (refreshBtn) refreshBtn.disabled = false;
+  }
+}
+
 // ══ CSV IMPORT ══
 function handleCSVFile(file) {
   if (!file) return;
-  Papa.parse(file, {
+  const reader = new FileReader();
+  reader.onload = e => parseARText(e.target.result);
+  reader.readAsText(file);
+}
+
+function parseARText(csvText) {
+  Papa.parse(csvText, {
     complete: (results) => {
       const rows = results.data.filter(row => row.length > 1 && row[0] && row[0].toString().trim());
       const header = rows[0].map(h => h.toString().trim());
@@ -1267,11 +1369,11 @@ function handleCSVFile(file) {
       if (reconSummary.hasHistory) {
         showReconToast(reconSummary, openCt);
       } else {
-        showToast(`✅ CSV loaded: ${openCt} open · ${partialCt} partial pay · ${paidCt} collected`);
+        showToast(`✅ Data loaded: ${openCt} open · ${partialCt} partial · ${paidCt} collected`);
       }
     },
     error: (err) => {
-      showToast('Error parsing CSV: ' + err.message, false);
+      showToast('Error parsing AR data: ' + err.message, false);
     }
   });
 }
@@ -1308,7 +1410,13 @@ function showReconToast(s, openCt) {
 // ══ DASH ENRICHMENT IMPORT ══
 function handleDASHFile(file) {
   if (!file) return;
-  Papa.parse(file, {
+  const reader = new FileReader();
+  reader.onload = e => parseDASHText(e.target.result);
+  reader.readAsText(file);
+}
+
+function parseDASHText(csvText) {
+  Papa.parse(csvText, {
     header: true,
     skipEmptyLines: true,
     complete: (results) => {
