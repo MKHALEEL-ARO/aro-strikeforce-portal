@@ -1347,18 +1347,25 @@ async function findAndLoadFiles(dirHandle) {
   _showOL('loading');
 
   try {
-    let arEntry = null, arMod = 0, dashEntry = null;
+    let arEntry = null, arMod = 0, arYearLock = false, dashEntry = null;
+    const curYear = new Date().getFullYear().toString();
     for await (const entry of dirHandle.values()) {
       if (entry.kind !== 'file') continue;
       const n = entry.name.toLowerCase();
-      // AR file: prefer exact "AR_Invoices.csv", fallback to most-recent "AR transaction summary*.csv"
+      // AR file priority: 1) exact "AR_Invoices.csv", 2) current-year summary, 3) most-recently-modified summary
       if (n === 'ar_invoices.csv') {
-        arEntry = entry; arMod = Infinity;
-      } else if ((n.includes('ar transaction summary') || n.includes('ar invoices')) && n.endsWith('.csv') && arMod < Infinity) {
+        arEntry = entry; arYearLock = true; arMod = Infinity;
+      } else if (!arYearLock && (n.includes('ar transaction summary') || n.includes('ar invoices')) && n.endsWith('.csv')) {
+        const hasYear = entry.name.includes(curYear);
         const f = await entry.getFile();
-        if (f.lastModified > arMod) { arMod = f.lastModified; arEntry = entry; }
+        if (hasYear) {
+          // Always prefer current-year named file
+          if (!arYearLock) { arEntry = entry; arYearLock = true; arMod = f.lastModified; }
+        } else if (!arYearLock && f.lastModified > arMod) {
+          arMod = f.lastModified; arEntry = entry;
+        }
       }
-      // DASH file
+      // DASH / adjuster file
       if (n === 'dash.csv' || n.includes('job insurance') || n.includes('adjuster')) {
         dashEntry = entry;
       }
