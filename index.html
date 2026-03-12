@@ -797,31 +797,6 @@ body{font-family:'Barlow',sans-serif;background:var(--ice);color:var(--text);min
     <p id="wo-empty" style="display:none;text-align:center;padding:40px;color:var(--muted);font-size:13px">No invoices have been flagged for write-off yet. Use the <strong>Flag for Write-Off Review</strong> checkbox when logging a contact note.</p>
   </div>
 
-  <!-- ── MODAL: PRE-PORTAL IMPORT ── -->
-  <div class="modal" id="pp-modal">
-    <div class="modal-card">
-      <button class="modal-close" onclick="closePrePortalImport()">✕</button>
-      <h3>Add Pre-Portal Note</h3>
-      <p style="font-size:12px;color:var(--muted);margin-bottom:16px">Account: <strong id="pp-acct-name"></strong></p>
-      <div class="frow"><label class="flbl">Date of Contact</label><input type="date" class="finput" id="pp-date" /></div>
-      <div class="frow"><label class="flbl">Contacted Who</label><input type="text" class="finput" id="pp-who" placeholder="Name" /></div>
-      <div class="frow"><label class="flbl">Contact Method</label>
-        <select class="fselect" id="pp-method">
-          <option value="">— Select —</option>
-          <option>Phone – Customer</option><option>Phone – Insurance Carrier</option>
-          <option>Phone – Adjuster</option><option>Email</option>
-          <option>Voicemail</option><option>No Answer</option><option>In Person</option>
-        </select>
-      </div>
-      <div class="frow"><label class="flbl">Next Action</label><input type="text" class="finput" id="pp-action" placeholder="e.g. Call adjuster back 3/15" /></div>
-      <div class="frow"><label class="flbl">Notes</label><textarea class="ftextarea" id="pp-notes" placeholder="Summarize the conversation..."></textarea></div>
-      <div class="frow"><label class="flbl">Logged By (optional)</label><input type="text" class="finput" id="pp-by" placeholder="Name or leave blank for current user" /></div>
-      <div style="display:flex;gap:8px">
-        <button class="btn-submit" onclick="submitPrePortal()" style="background:var(--royal)">Import Note</button>
-        <button class="btn-submit" onclick="closePrePortalImport()" style="background:#999;flex:0">Cancel</button>
-      </div>
-    </div>
-  </div>
 
 </div>
 
@@ -1992,13 +1967,15 @@ function renderNotePanel(){
       <label for="f-writeoff">⚠ Flag for Write-Off Review — include this invoice in the write-off report</label>
     </div>
     <button class="btn-submit" onclick="submitNote()">LOG CONTACT →</button>
-    <button onclick="showPrePortalImport()" style="width:100%;margin-top:8px;padding:9px;background:none;border:1px dashed rgba(196,127,15,0.4);border-radius:8px;color:var(--gold);font-size:11px;font-weight:700;letter-spacing:1px;cursor:pointer;transition:all .2s" onmouseover="this.style.background='rgba(196,127,15,0.06)'" onmouseout="this.style.background='none'">⏱ ADD PRE-PORTAL NOTE FROM EXCEL</button>
     ${notes.length?`<div class="note-hist"><div class="divider"></div><h4>Previous Notes (${notes.length})</h4>
-      ${notes.slice().reverse().map(n=>{
+      ${notes.slice().reverse().map((n, revIdx)=>{
+        const origIdx = notes.length - 1 - revIdx;
         const eligible=isBonusEligibleNote(n.date);
         const prePortal=n.source==='pre-portal'||!eligible;
+        const canDelete = isAdmin() || (currentUser && n.by === currentUser.name);
+        const delBtn = canDelete ? `<button onclick="deleteNote('${selectedAccount.id}',${origIdx})" title="Delete this note" style="background:none;border:none;cursor:pointer;padding:2px 6px;border-radius:6px;font-size:13px;color:#ccc;transition:all .2s;float:right;line-height:1" onmouseover="this.style.color='var(--red)';this.style.background='rgba(192,57,43,0.08)'" onmouseout="this.style.color='#ccc';this.style.background='none'">🗑</button>` : '';
         return `<div class="note-entry ${prePortal?'ne-preportal':''}">
-          <div style="margin-bottom:4px">${prePortal?'<span class="ne-preportal-tag">⏱ Pre-Portal — Not Bonus Eligible</span>':'<span class="ne-portal-tag">✅ Portal Note</span>'}</div>
+          <div style="margin-bottom:4px;display:flex;justify-content:space-between;align-items:center">${prePortal?'<span class="ne-preportal-tag">⏱ Pre-Portal — Not Bonus Eligible</span>':'<span class="ne-portal-tag">✅ Portal Note</span>'}${delBtn}</div>
           <div class="ne-hdr"><div class="ne-who">${n.by}</div><div class="ne-date">${n.date}</div></div>
           <div class="ne-method">${n.method}${n.claim?` · <span style="font-size:10px;font-weight:700;padding:1px 7px;border-radius:10px;background:${n.claim==='Quick Pay Discount'?'#fff3cd;color:#856404':n.claim==='Collected – Full'?'rgba(10,138,95,0.12);color:var(--green)':'rgba(13,36,97,0.07);color:var(--muted)'}">${n.claim}</span>`:''}</div>
           <div class="ne-text">${n.notes||'(no notes)'}</div>
@@ -2286,38 +2263,16 @@ function resetPassword(id){
   if(u){const np=prompt(`Set new password for ${u.name}:`);if(np){u.password=np;DataLayer.saveUsers(USERS);showToast(`Password reset for ${u.name}`);}}
 }
 
-// ══ PRE-PORTAL IMPORT ══
-function showPrePortalImport(){
-  if(!selectedAccount){showToast('Select an account first',false);return;}
-  document.getElementById('pp-acct-name').textContent=selectedAccount.customer+' · '+selectedAccount.job;
-  document.getElementById('pp-modal').style.display='flex';
-  const d=new Date(BONUS.startDate||'2026-03-15');
-  d.setDate(d.getDate()-1);
-  document.getElementById('pp-date').value=d.toISOString().split('T')[0];
-}
-
-function closePrePortalImport(){
-  document.getElementById('pp-modal').style.display='none';
-}
-
-function submitPrePortal(){
-  const date=document.getElementById('pp-date').value;
-  const method=document.getElementById('pp-method').value;
-  const notes=document.getElementById('pp-notes').value.trim();
-  const by=document.getElementById('pp-by').value.trim()||currentUser.name;
-  if(!method||!notes){showToast('Contact method and notes are required',false);return;}
-  if(!NOTES[selectedAccount.id])NOTES[selectedAccount.id]=[];
-  NOTES[selectedAccount.id].push({
-    source:'pre-portal',
-    by,date,
-    who:document.getElementById('pp-who').value,method,
-    notes,action:document.getElementById('pp-action').value,
-    ts:new Date().toISOString()
-  });
+// ══ DELETE NOTE ══
+function deleteNote(acctId, origIdx){
+  if(!confirm('Delete this note? This cannot be undone.')) return;
+  if(!NOTES[acctId] || origIdx < 0 || origIdx >= NOTES[acctId].length) return;
+  NOTES[acctId].splice(origIdx, 1);
+  if(NOTES[acctId].length === 0) delete NOTES[acctId];
   DataLayer.saveNotes(NOTES);
-  closePrePortalImport();
-  showToast('⏱ Pre-portal note imported');
-  renderNotePanel(); renderAccounts();
+  showToast('Note deleted');
+  renderNotePanel();
+  renderAccounts();
 }
 
 // ══ UTILITIES ══
