@@ -500,12 +500,30 @@ body{font-family:'Barlow',sans-serif;background:var(--ice);color:var(--text);min
     </div>
   </div>
 
-  <!-- GitHub data loading overlay -->
+  <!-- Data folder loading overlay -->
   <div id="gh-loading-overlay" style="display:none">
     <div class="gh-loader-box">
-      <div class="gh-spinner"></div>
-      <div class="gh-loader-title">LOADING PORTAL DATA</div>
-      <div class="gh-loader-sub" id="gh-loader-sub">Fetching latest AR & DASH data…</div>
+      <!-- Connect folder state -->
+      <div id="ol-connect-state">
+        <div style="font-size:36px;margin-bottom:12px">📁</div>
+        <div class="gh-loader-title">CONNECT DATA FOLDER</div>
+        <div class="gh-loader-sub" style="margin-bottom:20px">Select the <strong>Claude reports</strong> folder in OneDrive to load AR &amp; DASH data automatically.</div>
+        <button onclick="pickDataFolder()" style="padding:11px 28px;background:var(--navy);color:#fff;border:none;border-radius:8px;font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:800;letter-spacing:2px;cursor:pointer;width:100%">SELECT FOLDER</button>
+        <div style="font-size:11px;color:var(--muted);margin-top:10px">You'll only need to do this once.</div>
+      </div>
+      <!-- Loading state -->
+      <div id="ol-loading-state" style="display:none">
+        <div class="gh-spinner"></div>
+        <div class="gh-loader-title">LOADING DATA</div>
+        <div class="gh-loader-sub" id="gh-loader-sub">Reading files from your data folder…</div>
+      </div>
+      <!-- Error state -->
+      <div id="ol-error-state" style="display:none">
+        <div style="font-size:32px;margin-bottom:12px">⚠️</div>
+        <div class="gh-loader-title" style="color:#c0392b">COULD NOT LOAD DATA</div>
+        <div class="gh-loader-sub" id="ol-error-msg" style="margin-bottom:16px"></div>
+        <button onclick="pickDataFolder()" style="padding:9px 24px;background:var(--navy);color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:700;letter-spacing:1px;cursor:pointer">TRY DIFFERENT FOLDER</button>
+      </div>
     </div>
   </div>
 
@@ -904,6 +922,8 @@ const DataLayer = {
   },
   saveNotes(notes) {
     try { localStorage.setItem('aro_notes_v1', JSON.stringify(notes)); } catch(e) {}
+    // Async write to data folder for audit trail (fire-and-forget)
+    if (typeof writeNotesToFolder === 'function') writeNotesToFolder(null).catch(() => {});
   },
   getUsers() {
     try {
@@ -962,7 +982,7 @@ function doLogin(){
   document.getElementById('login-screen').style.display='none';
   document.getElementById('app').style.display='block';
   renderUI();
-  autoLoadFromGitHub(false);
+  initDataFolder();
 }
 
 function doLogout(){
@@ -1216,63 +1236,209 @@ function renderBrandSummary() {
   document.getElementById('summary-tbody').innerHTML = detailRows.join('');
 }
 
-// ══ GITHUB AUTO-LOADER ══
-const GH_RAW = 'https://raw.githubusercontent.com/MKHALEEL-ARO/aro-strikeforce-portal/main/data/';
+// ══ FILE SYSTEM ACCESS API — DATA FOLDER ══
+let DATA_DIR_HANDLE = null;
 
-async function autoLoadFromGitHub(isManualRefresh) {
+// ── IndexedDB helpers for persisting folder handle ──
+const IDB_NAME = 'aro-portal-db', IDB_STORE = 'folder-handles';
+function _openIDB() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(IDB_NAME, 1);
+    r.onupgradeneeded = e => e.target.result.createObjectStore(IDB_STORE);
+    r.onsuccess = e => res(e.target.result);
+    r.onerror = e => rej(e.target.error);
+  });
+}
+async function _saveHandle(h) {
+  const db = await _openIDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).put(h, 'data-folder');
+    tx.oncomplete = res; tx.onerror = e => rej(e.target.error);
+  });
+}
+async function _loadHandle() {
+  try {
+    const db = await _openIDB();
+    return new Promise((res) => {
+      const tx = db.transaction(IDB_STORE, 'readonly');
+      const req = tx.objectStore(IDB_STORE).get('data-folder');
+      req.onsuccess = e => res(e.target.result || null);
+      req.onerror = () => res(null);
+    });
+  } catch(e) { return null; }
+}
+
+// ── Show/hide overlay states ──
+function _showOL(state) {
+  // state: 'connect' | 'loading' | 'error'
+  document.getElementById('gh-loading-overlay').style.display = 'flex';
+  document.getElementById('ol-connect-state').style.display  = state === 'connect'  ? 'block' : 'none';
+  document.getElementById('ol-loading-state').style.display  = state === 'loading'  ? 'block' : 'none';
+  document.getElementById('ol-error-state').style.display    = state === 'error'    ? 'block' : 'none';
+}
+function _hideOL() { document.getElementById('gh-loading-overlay').style.display = 'none'; }
+
+// ── User picks a folder ──
+async function pickDataFolder() {
+  try {
+    const h = await window.showDirectoryPicker({ mode: 'readwrite', id: 'aro-data', startIn: 'documents' });
+    await _saveHandle(h);
+    DATA_DIR_HANDLE = h;
+    await findAndLoadFiles(h);
+  } catch(e) {
+    if (e.name !== 'AbortError') { _showOL('error'); document.getElementById('ol-error-msg').textContent = e.message; }
+  }
+}
+
+// ── Main entry point after login ──
+async function initDataFolder() {
   const overlay = document.getElementById('gh-loading-overlay');
-  const subLabel = document.getElementById('gh-loader-sub');
   const refreshBtn = document.getElementById('btn-refresh-data');
   if (refreshBtn) refreshBtn.disabled = true;
+  overlay.style.display = 'flex';
 
-  // Show overlay on first load; show toast on manual refresh
-  if (!isManualRefresh) {
-    if (overlay) overlay.style.display = 'flex';
-  } else {
-    showToast('🔄 Refreshing data from GitHub…');
+  // Try stored handle
+  const stored = await _loadHandle();
+  if (stored) {
+    try {
+      const perm = await stored.queryPermission({ mode: 'readwrite' });
+      if (perm === 'granted') {
+        DATA_DIR_HANDLE = stored;
+        _showOL('loading');
+        await findAndLoadFiles(stored);
+        return;
+      }
+      // Need to re-request (requires user gesture — show connect state)
+    } catch(e) {}
   }
+  // No handle or needs re-grant — show connect UI
+  _showOL('connect');
+  if (refreshBtn) refreshBtn.disabled = false;
+}
+
+// ── Re-grant permission (needs user gesture) then load ──
+async function autoLoadFromGitHub(isManualRefresh) {
+  // Renamed entry point kept for compatibility — delegates to folder system
+  const refreshBtn = document.getElementById('btn-refresh-data');
+  if (refreshBtn) refreshBtn.disabled = true;
+  if (isManualRefresh) showToast('🔄 Refreshing from data folder…');
+
+  if (DATA_DIR_HANDLE) {
+    // Re-request permission if needed (requires user gesture on manual refresh)
+    const perm = await DATA_DIR_HANDLE.requestPermission({ mode: 'readwrite' });
+    if (perm === 'granted') {
+      _showOL('loading');
+      await findAndLoadFiles(DATA_DIR_HANDLE);
+    } else {
+      showToast('⚠️ Folder access denied. Please click Select Folder.', false);
+      _showOL('connect');
+    }
+  } else {
+    _showOL('connect');
+  }
+  if (refreshBtn) refreshBtn.disabled = false;
+}
+
+// ── Find and read AR + DASH files from the folder ──
+async function findAndLoadFiles(dirHandle) {
+  const sub = document.getElementById('gh-loader-sub');
+  if (sub) sub.textContent = 'Scanning data folder…';
+  _showOL('loading');
 
   try {
-    // Fetch AR and DASH in parallel
-    if (subLabel) subLabel.textContent = 'Fetching AR Invoices…';
-    const [arResp, dashResp] = await Promise.all([
-      fetch(GH_RAW + 'AR_Invoices.csv?t=' + Date.now()),
-      fetch(GH_RAW + 'DASH.csv?t=' + Date.now())
-    ]);
-
-    if (!arResp.ok) throw new Error(`AR file not found (${arResp.status}). Upload AR_Invoices.csv to the GitHub data/ folder.`);
-    const arText = await arResp.text();
-
-    if (subLabel) subLabel.textContent = 'Parsing account data…';
-    parseARText(arText);
-
-    if (dashResp.ok) {
-      const dashText = await dashResp.text();
-      parseDASHText(dashText);
-    } else {
-      const statusEl = document.getElementById('dash-status');
-      if (statusEl) statusEl.innerHTML = '<span style="color:var(--muted)">No DASH.csv found in repo — adjuster data unavailable</span>';
+    let arEntry = null, arMod = 0, dashEntry = null;
+    for await (const entry of dirHandle.values()) {
+      if (entry.kind !== 'file') continue;
+      const n = entry.name.toLowerCase();
+      // AR file: prefer exact "AR_Invoices.csv", fallback to most-recent "AR transaction summary*.csv"
+      if (n === 'ar_invoices.csv') {
+        arEntry = entry; arMod = Infinity;
+      } else if ((n.includes('ar transaction summary') || n.includes('ar invoices')) && n.endsWith('.csv') && arMod < Infinity) {
+        const f = await entry.getFile();
+        if (f.lastModified > arMod) { arMod = f.lastModified; arEntry = entry; }
+      }
+      // DASH file
+      if (n === 'dash.csv' || n.includes('job insurance') || n.includes('adjuster')) {
+        dashEntry = entry;
+      }
     }
 
-    // Update status indicators
+    if (!arEntry) throw new Error('No AR data file found in folder. Expecting "AR transaction summary*.csv" or "AR_Invoices.csv".');
+
+    if (sub) sub.textContent = 'Reading AR data…';
+    const arFile = await arEntry.getFile();
+    const arText = await arFile.text();
+    parseARText(arText);
+
+    if (dashEntry) {
+      if (sub) sub.textContent = 'Reading DASH data…';
+      const dashFile = await dashEntry.getFile();
+      parseDASHText(await dashFile.text());
+    } else {
+      const statusEl = document.getElementById('dash-status');
+      if (statusEl) statusEl.innerHTML = '<span style="color:var(--muted)">No DASH file found in folder</span>';
+    }
+
+    // Update status bar
     const now = new Date();
     const timeStr = now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
     const dateStr = now.toLocaleDateString([], {month:'short',day:'numeric'});
     const dsLabel = document.getElementById('ds-label');
     const lastLoaded = document.getElementById('data-last-loaded');
-    const statusBar = document.getElementById('data-status-bar');
     if (dsLabel) dsLabel.textContent = dateStr + ' ' + timeStr;
-    if (lastLoaded) lastLoaded.textContent = 'Last refreshed: ' + dateStr + ' at ' + timeStr;
+    if (lastLoaded) lastLoaded.textContent = 'Folder: ' + dirHandle.name + ' · Loaded ' + timeStr;
+    const statusBar = document.getElementById('data-status-bar');
     if (statusBar) statusBar.style.display = 'flex';
 
+    // Write notes to folder for audit trail
+    await writeNotesToFolder(dirHandle);
+
   } catch(err) {
-    showToast('⚠️ ' + err.message, false);
-    // Show empty state
-    document.getElementById('csv-import-banner').style.display = 'none';
-    renderAccountsPage();
-  } finally {
-    if (overlay) overlay.style.display = 'none';
+    _showOL('error');
+    document.getElementById('ol-error-msg').textContent = err.message;
+    const refreshBtn = document.getElementById('btn-refresh-data');
     if (refreshBtn) refreshBtn.disabled = false;
+    return;
+  }
+  _hideOL();
+  const refreshBtn = document.getElementById('btn-refresh-data');
+  if (refreshBtn) refreshBtn.disabled = false;
+}
+
+// ── Write notes audit trail to folder ──
+async function writeNotesToFolder(dirHandle) {
+  if (!dirHandle) { dirHandle = DATA_DIR_HANDLE; }
+  if (!dirHandle) return;
+  try {
+    const notes = DataLayer.getNotes();
+    const today = new Date().toISOString().split('T')[0];
+
+    // Write full notes JSON (always overwrite with latest)
+    const jsonHandle = await dirHandle.getFileHandle('portal_notes.json', { create: true });
+    const jsonW = await jsonHandle.createWritable();
+    await jsonW.write(JSON.stringify({ exportedAt: new Date().toISOString(), notes }, null, 2));
+    await jsonW.close();
+
+    // Build daily audit CSV rows
+    const rows = ['Date,Time,Collector,Account ID,Customer,Brand,Contact Method,Who Contacted,Notes,Action,Follow-up,Claim #'];
+    Object.entries(notes).forEach(([acctId, noteList]) => {
+      (noteList || []).forEach(n => {
+        const acct = ACCOUNTS.find(a => a.id === acctId) || {};
+        const dt = n.ts ? new Date(n.ts) : new Date(n.date || '');
+        const dateStr2 = dt.toLocaleDateString() || n.date || '';
+        const timeStr2 = dt.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) || '';
+        const esc = v => '"' + (v||'').replace(/"/g,'""') + '"';
+        rows.push([dateStr2, timeStr2, esc(n.by||n.collector||''), esc(acctId), esc(acct.customer||''), esc(acct.brand||acct.entityName||''), esc(n.method||''), esc(n.who||''), esc(n.notes||''), esc(n.action||''), esc(n.followup||''), esc(n.claim||'')].join(','));
+      });
+    });
+    const csvName = 'audit_' + today + '.csv';
+    const csvHandle = await dirHandle.getFileHandle(csvName, { create: true });
+    const csvW = await csvHandle.createWritable();
+    await csvW.write(rows.join('\n'));
+    await csvW.close();
+  } catch(e) {
+    console.warn('writeNotesToFolder error:', e);
   }
 }
 
@@ -1462,15 +1628,10 @@ function renderAccountsPage(){
   ACCOUNTS = ar;
   populateBrandFilter();
 
-  if(ACCOUNTS.length === 0) {
-    document.getElementById('csv-import-banner').style.display = 'block';
-    document.getElementById('csv-reload-link').style.display = 'none';
-    document.getElementById('dash-import-bar').style.display = 'none';
-  } else {
-    document.getElementById('csv-import-banner').style.display = 'none';
-    document.getElementById('csv-reload-link').style.display = 'flex';
-    document.getElementById('dash-import-bar').style.display = 'flex';
-  }
+  // Banner hidden — data loads via folder picker overlay
+  document.getElementById('csv-import-banner').style.display = 'none';
+  document.getElementById('csv-reload-link').style.display = ACCOUNTS.length > 0 ? 'flex' : 'none';
+  document.getElementById('dash-import-bar').style.display = ACCOUNTS.length > 0 ? 'flex' : 'none';
 
   const visible = visibleAccounts();
   const filtered = getFiltered(visible);
