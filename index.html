@@ -1770,7 +1770,7 @@ function renderAccountsPage(){
     const esc   = str => (str||'').replace(/"/g,'&quot;');
     const bname1 = BRANDS.find(b => b.id === a.brand)?.name || a.brand || '—';
     return `<tr class="acct-row${selCls}" onclick="selectAccount(this,'${a.id}')">
-      <td style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(bname1)}">${trunc(bname1,20)}</td>
+      <td style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(bname1)}">${esc(bname1)}</td>
       <td><div class="cust-name">${a.customer}${woNote}${litNote}</div><div class="cust-meta">${a.job || a.jobId || ''}</div>${contactLine}</td>
       <td style="font-size:13px;white-space:nowrap">${a.dueDate || '—'}</td>
       <td><span class="age-badge ${ageCls(d)}">${ageLbl(d)}</span></td>
@@ -1858,7 +1858,7 @@ function renderAccounts(){
     const esc   = str => (str||'').replace(/"/g,'&quot;');
     const bname2 = BRANDS.find(b => b.id === a.brand)?.name || a.brand || '—';
     return `<tr class="acct-row${selCls}" onclick="selectAccount(this,'${a.id}')">
-      <td style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(bname2)}">${trunc(bname2,20)}</td>
+      <td style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(bname2)}">${esc(bname2)}</td>
       <td><div class="cust-name">${a.customer}${woNote}${litNote}</div><div class="cust-meta">${a.job || a.jobId || ''}</div>${contactLine}</td>
       <td style="font-size:13px;white-space:nowrap">${a.dueDate || '—'}</td>
       <td><span class="age-badge ${ageCls(d)}">${ageLbl(d)}</span></td>
@@ -2361,12 +2361,14 @@ function initResizableColumns(){
       e.preventDefault(); e.stopPropagation();
       const startX  = e.clientX;
       const startW  = th.offsetWidth;
+      // snapshot all other column widths once — avoids reflow on every mousemove
+      const baseTotal = ths.reduce((s,t) => s + t.offsetWidth, 0);
       handle.classList.add('active');
       const onMove = mv => {
-        const newW = Math.max(40, startW + mv.clientX - startX);
-        th.style.width = newW + 'px';
-        // keep total table width in sync so horizontal scroll works
-        tbl.style.width = ths.reduce((s,t) => s + t.offsetWidth, 0) + 'px';
+        const delta = mv.clientX - startX;
+        const newW  = Math.max(40, startW + delta);
+        th.style.width   = newW + 'px';
+        tbl.style.width  = (baseTotal - startW + newW) + 'px';
       };
       const onUp = () => {
         handle.classList.remove('active');
