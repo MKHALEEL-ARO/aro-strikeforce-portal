@@ -630,7 +630,7 @@ body{font-family:'Titillium Web',Arial,sans-serif;background:var(--ice);color:va
         </select>
         <input type="text" id="acct-search" placeholder="Search customer, invoice, job..."
           style="padding:6px 14px;border-radius:20px;border:1px solid var(--border);font-size:12px;outline:none;width:200px;margin-left:auto"
-          oninput="renderAccounts()">
+          oninput="renderAccountsDebounced()">
       </div>
     </div><!-- end accts-sticky-hdr -->
 
@@ -1728,9 +1728,10 @@ function renderAccountsPage(){
   document.getElementById('acct-count').textContent = filtered.length + ' accounts';
 
   const stats = {total:0,partial:0,d30:0,d60:0,d90:0,d120:0,d180:0,d365:0,d366:0,contacted:0,balance:0,partialBal:0};
+  _renderNow = Date.now(); // refresh once for the entire renderAccountsPage pass
   filtered.forEach(a => {
     stats.total++;
-    const d = daysAged(a.dueDate);
+    const d = daysAged(a.dueDate); // uses cached _renderNow
     if(d<=30)       stats.d30++;
     else if(d<=60)  stats.d60++;
     else if(d<=90)  stats.d90++;
@@ -1756,32 +1757,34 @@ function renderAccountsPage(){
     <div class="stat-card" style="background:#f0d0dc;border:1px solid rgba(80,0,40,0.35)"><div class="stat-lbl" style="color:#500028">366+ Days 🔥</div><div class="stat-val" style="color:#500028">${stats.d366}</div></div>
   `;
 
-  if(isAdmin()) document.getElementById('bonus-col-hdr').style.display = '';
+  const admin1 = isAdmin();
+  if(admin1) document.getElementById('bonus-col-hdr').style.display = '';
+  _renderNow = Date.now(); // refresh timestamp once for this entire render pass
+  const brandMap1 = Object.fromEntries(BRANDS.map(b => [b.id, b.name]));
+  const selId1 = selectedAccount ? selectedAccount.id : null;
   document.getElementById('acct-tbody').innerHTML = filtered.map(a => {
-    const d = daysAged(a.dueDate);
+    const d     = daysAged(a.dueDate);
     const notes = NOTES[a.id] || [];
-    const rec = getRecStatus(a, notes);
-    const bnus = isAdmin() ? bonusFor(a) : '';
+    const rec   = getRecStatus(a, notes, d);
+    const bnus  = admin1 ? bonusFor(a, d) : '';
     const woNote  = notes.some(n => n.needsWriteOff) ? '<span class="writeoff-flag" style="font-size:12px;margin-left:6px">⚠ W/O</span>' : '';
     const litNote = notes.some(n => n.litigation)    ? '<span class="litigation-flag" style="font-size:12px;margin-left:4px">⚖ LIT</span>' : '';
     const contactLine = (a.phone || a.email) ? `<div class="cust-contact">${a.phone ? `<a href="tel:${a.phone}" onclick="event.stopPropagation()">📱 ${a.phone}</a>` : ''}${a.email ? `<a href="mailto:${a.email}" onclick="event.stopPropagation()">✉ ${a.email}</a>` : ''}</div>` : '';
-    const selCls = selectedAccount && selectedAccount.id === a.id ? ' selected' : '';
-    const trunc = (str, n) => str && str.length > n ? str.substring(0, n) + '…' : (str || '—');
-    const esc   = str => (str||'').replace(/"/g,'&quot;');
-    const bname1 = BRANDS.find(b => b.id === a.brand)?.name || a.brand || '—';
+    const selCls = selId1 && selId1 === a.id ? ' selected' : '';
+    const bname1 = brandMap1[a.brand] || a.brand || '—';
     return `<tr class="acct-row${selCls}" onclick="selectAccount(this,'${a.id}')">
-      <td style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(bname1)}">${esc(bname1)}</td>
+      <td style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${_esc(bname1)}">${_esc(bname1)}</td>
       <td><div class="cust-name">${a.customer}${woNote}${litNote}</div><div class="cust-meta">${a.job || a.jobId || ''}</div>${contactLine}</td>
       <td style="font-size:13px;white-space:nowrap">${a.dueDate || '—'}</td>
       <td><span class="age-badge ${ageCls(d)}">${ageLbl(d)}</span></td>
       <td><div class="bal-val">${fmt(a.balance)}</div></td>
       <td style="font-size:13px;white-space:nowrap">${a.state || '—'}</td>
-      <td style="font-size:13px;max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(a.jobStatus)}">${trunc(a.jobStatus,25)}</td>
-      <td style="font-size:13px;max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(a.arCode)}">${trunc(a.arCode,25)}</td>
-      <td style="font-size:13px;max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(a.memo)}">${trunc(a.memo,45)}</td>
+      <td style="font-size:13px;max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${_esc(a.jobStatus)}">${_trunc(a.jobStatus,25)}</td>
+      <td style="font-size:13px;max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${_esc(a.arCode)}">${_trunc(a.arCode,25)}</td>
+      <td style="font-size:13px;max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${_esc(a.memo)}">${_trunc(a.memo,45)}</td>
       <td style="font-size:13px;white-space:nowrap">${a.invoiceDate || '—'}</td>
       <td><span class="ins-tag">${a.insurance ? '<span class="ins-dot"></span>' + a.insurance : '—'}</span></td>
-      ${isAdmin() ? `<td>${bnus ? '<span class="bonus-pill">'+bnus+'</span>' : '—'}</td>` : ''}
+      ${admin1 ? `<td>${bnus ? '<span class="bonus-pill">'+bnus+'</span>' : '—'}</td>` : ''}
       <td><span class="rec-tag ${rec.cls}">${rec.status}</span></td>
     </tr>`;
   }).join('');
@@ -1842,34 +1845,36 @@ function setFilter(f, btn){
 }
 
 function renderAccounts(){
-  const visible = visibleAccounts();
+  _renderNow = Date.now(); // refresh timestamp once for this render pass
+  const visible  = visibleAccounts();
   const filtered = getFiltered(visible);
   document.getElementById('acct-count').textContent = filtered.length + ' accounts';
+  const admin2    = isAdmin();
+  const brandMap2 = Object.fromEntries(BRANDS.map(b => [b.id, b.name]));
+  const selId2    = selectedAccount ? selectedAccount.id : null;
   document.getElementById('acct-tbody').innerHTML = filtered.map(a => {
-    const d = daysAged(a.dueDate);
+    const d     = daysAged(a.dueDate);
     const notes = NOTES[a.id] || [];
-    const rec = getRecStatus(a, notes);
-    const bnus = isAdmin() ? bonusFor(a) : '';
+    const rec   = getRecStatus(a, notes, d);
+    const bnus  = admin2 ? bonusFor(a, d) : '';
     const woNote  = notes.some(n => n.needsWriteOff) ? '<span class="writeoff-flag" style="font-size:12px;margin-left:6px">⚠ W/O</span>' : '';
     const litNote = notes.some(n => n.litigation)    ? '<span class="litigation-flag" style="font-size:12px;margin-left:4px">⚖ LIT</span>' : '';
     const contactLine = (a.phone || a.email) ? `<div class="cust-contact">${a.phone ? `<a href="tel:${a.phone}" onclick="event.stopPropagation()">📱 ${a.phone}</a>` : ''}${a.email ? `<a href="mailto:${a.email}" onclick="event.stopPropagation()">✉ ${a.email}</a>` : ''}</div>` : '';
-    const selCls = selectedAccount && selectedAccount.id === a.id ? ' selected' : '';
-    const trunc = (str, n) => str && str.length > n ? str.substring(0, n) + '…' : (str || '—');
-    const esc   = str => (str||'').replace(/"/g,'&quot;');
-    const bname2 = BRANDS.find(b => b.id === a.brand)?.name || a.brand || '—';
+    const selCls = selId2 && selId2 === a.id ? ' selected' : '';
+    const bname2 = brandMap2[a.brand] || a.brand || '—';
     return `<tr class="acct-row${selCls}" onclick="selectAccount(this,'${a.id}')">
-      <td style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(bname2)}">${esc(bname2)}</td>
+      <td style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${_esc(bname2)}">${_esc(bname2)}</td>
       <td><div class="cust-name">${a.customer}${woNote}${litNote}</div><div class="cust-meta">${a.job || a.jobId || ''}</div>${contactLine}</td>
       <td style="font-size:13px;white-space:nowrap">${a.dueDate || '—'}</td>
       <td><span class="age-badge ${ageCls(d)}">${ageLbl(d)}</span></td>
       <td><div class="bal-val">${fmt(a.balance)}</div></td>
       <td style="font-size:13px;white-space:nowrap">${a.state || '—'}</td>
-      <td style="font-size:13px;max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(a.jobStatus)}">${trunc(a.jobStatus,25)}</td>
-      <td style="font-size:13px;max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(a.arCode)}">${trunc(a.arCode,25)}</td>
-      <td style="font-size:13px;max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(a.memo)}">${trunc(a.memo,45)}</td>
+      <td style="font-size:13px;max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${_esc(a.jobStatus)}">${_trunc(a.jobStatus,25)}</td>
+      <td style="font-size:13px;max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${_esc(a.arCode)}">${_trunc(a.arCode,25)}</td>
+      <td style="font-size:13px;max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${_esc(a.memo)}">${_trunc(a.memo,45)}</td>
       <td style="font-size:13px;white-space:nowrap">${a.invoiceDate || '—'}</td>
       <td><span class="ins-tag">${a.insurance ? '<span class="ins-dot"></span>' + a.insurance : '—'}</span></td>
-      ${isAdmin() ? `<td>${bnus ? '<span class="bonus-pill">'+bnus+'</span>' : '—'}</td>` : ''}
+      ${admin2 ? `<td>${bnus ? '<span class="bonus-pill">'+bnus+'</span>' : '—'}</td>` : ''}
       <td><span class="rec-tag ${rec.cls}">${rec.status}</span></td>
     </tr>`;
   }).join('');
@@ -2201,8 +2206,8 @@ function renderLeaderboard(){
 }
 
 // ══ RECONCILIATION ══
-function getRecStatus(account, notes) {
-  const d  = daysAged(account.dueDate);
+function getRecStatus(account, notes, d) {
+  if (d === undefined) d = daysAged(account.dueDate); // backward-compat if called standalone
   const ps = account.payStatus || (account.balance <= 0 ? 'paid' : 'open');
   const portalNotes    = (notes || []).filter(n => n.source === 'portal');
   const hasPortalNote  = portalNotes.length > 0;
@@ -2316,7 +2321,21 @@ function isAdmin() { return currentUser && currentUser.role === 'admin'; }
 function isController() { return currentUser && (currentUser.role === 'controller' || currentUser.role === 'admin'); }
 function fmt(n)      { return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:0,maximumFractionDigits:0}).format(n); }
 function fmtCents(n) { return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:2}).format(n); }
-function daysAged(dateStr) { const due=new Date(dateStr); return Math.floor((new Date()-due)/(1000*60*60*24)); }
+
+// Cache today's timestamp once per render cycle — avoids new Date() on every row
+let _renderNow = Date.now();
+function daysAged(dateStr) { return Math.floor((_renderNow - new Date(dateStr)) / 86400000); }
+
+// Module-level helpers — defined once, not re-created inside .map() on every row
+function _trunc(str, n) { return str && str.length > n ? str.substring(0, n) + '\u2026' : (str || '\u2014'); }
+function _esc(str)       { return (str||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;'); }
+
+// Debounced search — prevents full re-render on every keypress
+let _searchTimer = null;
+function renderAccountsDebounced() {
+  clearTimeout(_searchTimer);
+  _searchTimer = setTimeout(renderAccounts, 200);
+}
 function ageLbl(d) {
   if(d<=30)  return '0–30d';
   if(d<=60)  return '31–60d';
@@ -2336,7 +2355,7 @@ function ageCls(d) {
   return 'ab-366';
 }
 function isBonusEligibleNote(noteDate) { const campaignStart = new Date(BONUS.startDate || '2026-03-15'); return new Date(noteDate) >= campaignStart; }
-function bonusFor(account) { if(!isAdmin()) return ''; const d = daysAged(account.dueDate); if(d>=60 && account.balance>BONUS.threshold) return '$250 MEGA'; if(d>90) return '$50'; if(d>=61) return '$25'; return ''; }
+function bonusFor(account, d) { if (d === undefined) d = daysAged(account.dueDate); if(d>=60 && account.balance>BONUS.threshold) return '$250 MEGA'; if(d>90) return '$50'; if(d>=61) return '$25'; return ''; }
 function updateCountdown() { const end=new Date(BONUS.endDate||'2026-03-31'); const now=new Date(); const d=Math.ceil((end-now)/(1000*60*60*24)); document.getElementById('cb-days').textContent=d>0?d:0; }
 function showToast(msg,ok=true) {
   const t=document.getElementById('toast');
