@@ -43,9 +43,19 @@ body{font-family:'Titillium Web',Arial,sans-serif;background:var(--ice);color:va
   text-align:center;margin-bottom:28px;
 }
 .login-logo-box .logo-wrap{
-  display:inline-block;background:#fff;border:1px solid var(--border);
-  border-radius:10px;padding:16px 28px;margin-bottom:16px;
-  box-shadow:var(--shadow);
+  display:inline-block;margin-bottom:16px;
+}
+.login-aro-wordmark{display:inline-flex;flex-direction:column;line-height:1.08;gap:2px;text-align:left;}
+.login-aro-american{
+  font-family:'Russo One',Arial,sans-serif;
+  font-size:26px;font-weight:900;color:#00479f;
+  letter-spacing:0.5px;text-transform:uppercase;
+}
+.login-aro-american sup{font-size:12px;vertical-align:super;letter-spacing:0;}
+.login-aro-restoration{
+  font-family:'Titillium Web',Arial,sans-serif;
+  font-size:17px;font-weight:700;color:#0a0f33;
+  letter-spacing:3px;text-transform:uppercase;
 }
 .login-logo-box h1{
   font-family:'Russo One',Arial,sans-serif;
@@ -512,15 +522,10 @@ body{font-family:'Titillium Web',Arial,sans-serif;background:var(--ice);color:va
   <div class="login-card">
     <div class="login-logo-box">
       <div class="logo-wrap">
-        <svg width="210" height="44" viewBox="0 0 210 44" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <rect width="210" height="44" rx="6" fill="white"/>
-          <!-- Shield icon -->
-          <path d="M10 8 L20 8 L20 12 L25 14 L25 28 C25 33 17.5 38 17.5 38 C17.5 38 10 33 10 28 Z" fill="#00479f"/>
-          <path d="M13 16 L17.5 20 L22 14" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-          <!-- ARO text -->
-          <text x="31" y="20" font-family="'Russo One',Arial,sans-serif" font-size="13" font-weight="900" letter-spacing="1" fill="#0a0f33">AMERICAN</text>
-          <text x="31" y="34" font-family="'Russo One',Arial,sans-serif" font-size="13" font-weight="900" letter-spacing="1" fill="#00479f">RESTORATION</text>
-        </svg>
+        <div class="login-aro-wordmark">
+          <span class="login-aro-american">AMERICAN<sup>™</sup></span>
+          <span class="login-aro-restoration">RESTORATION</span>
+        </div>
       </div>
       <h1>COLLECTIONS PORTAL</h1>
       <div class="sf-tag">⚡ ARO STRIKE FORCE ⚡</div>
