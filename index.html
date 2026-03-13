@@ -1016,6 +1016,12 @@ const DataLayer = {
   },
   saveUsers(users) {
     try { localStorage.setItem('aro_users_v2', JSON.stringify(users)); } catch(e) {}
+    // Async write to Azure Blob (primary sync — fire-and-forget)
+    if (typeof blobUpload === 'function' && typeof BLOB_SAS_URL !== 'undefined' && BLOB_SAS_URL) {
+      const payload = JSON.stringify({ exportedAt: new Date().toISOString(), users }, null, 0);
+      blobUpload('portal_users.json', payload).catch(e => console.warn('Azure user sync failed:', e));
+    }
+    // Async write to data folder for audit trail (fallback — fire-and-forget)
     if (typeof writeUsersToFolder === 'function') writeUsersToFolder(null).catch(() => {});
   },
   getBonus() {
