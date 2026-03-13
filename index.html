@@ -996,7 +996,11 @@ const DataLayer = {
   },
   saveNotes(notes) {
     try { localStorage.setItem('aro_notes_v1', JSON.stringify(notes)); } catch(e) {}
-    // Async write to data folder for audit trail (fire-and-forget)
+    // Async write to Azure Blob (primary sync — fire-and-forget)
+    if (typeof blobSyncNotes === 'function' && typeof BLOB_SAS_URL !== 'undefined' && BLOB_SAS_URL) {
+      blobSyncNotes().catch(e => console.warn('Azure note sync failed:', e));
+    }
+    // Async write to data folder for audit trail (fallback — fire-and-forget)
     if (typeof writeNotesToFolder === 'function') writeNotesToFolder(null).catch(() => {});
   },
   getUsers() {
@@ -1551,7 +1555,6 @@ function _blobParts() {
 async function blobFetch(filePath) {
   const p = _blobParts();
   if (!p) throw new Error('BLOB_SAS_URL not configured');
-  // Strip leading ? from sas and rebuild so we can add restype if needed
   const url = p.base + '/' + filePath + p.sas;
   const r = await fetch(url);
   if (!r.ok) throw new Error('Azure Blob fetch failed (' + r.status + ') for ' + filePath);
@@ -1575,6 +1578,57 @@ async function blobListPrefix(prefix) {
   const doc   = new DOMParser().parseFromString(xmlText, 'application/xml');
   const names = Array.from(doc.querySelectorAll('Blob Name')).map(n => n.textContent);
   return names; // e.g. ["DASH/A&J.csv", "DASH/SMF.csv", ...]
+}
+
+// ── Upload a file to blob container (requires Write permission on SAS) ──
+async function blobUpload(filePath, content) {
+  const p = _blobParts();
+  if (!p) return;
+  const url = p.base + '/' + filePath + p.sas;
+  const r = await fetch(url, {
+    method: 'PUT',
+    headers: {
+      'x-ms-blob-type': 'BlockBlob',
+      'Content-Type': 'application/json; charset=utf-8',
+    },
+    body: content,
+  });
+  if (!r.ok) {
+    const body = await r.text().catch(()=>'');
+    throw new Error('Azure Blob upload failed (' + r.status + '): ' + body.substring(0,150));
+  }
+}
+
+// ── Merge two notes objects — deduplicates by (by + date + ts + first 30 chars of text) ──
+function mergeNotes(localNotes, remoteNotes) {
+  const merged = {};
+  const allIds = new Set([...Object.keys(localNotes||{}), ...Object.keys(remoteNotes||{})]);
+  for (const id of allIds) {
+    const local  = (localNotes||{})[id]  || [];
+    const remote = (remoteNotes||{})[id] || [];
+    const seen = new Set();
+    const combined = [];
+    // Remote first so local changes take precedence in dedup
+    for (const note of [...remote, ...local]) {
+      const fp = (note.by||'') + '|' + (note.date||'') + '|' + (note.ts||'') + '|' + (note.notes||'').substring(0,30);
+      if (!seen.has(fp)) { seen.add(fp); combined.push(note); }
+    }
+    // Sort chronologically
+    combined.sort((a,b) => {
+      const ta = a.ts ? a.ts : (new Date(a.date||0).getTime());
+      const tb = b.ts ? b.ts : (new Date(b.date||0).getTime());
+      return ta - tb;
+    });
+    if (combined.length) merged[id] = combined;
+  }
+  return merged;
+}
+
+// ── Push current NOTES to Azure Blob (fire-and-forget from saveNotes) ──
+async function blobSyncNotes() {
+  if (!BLOB_SAS_URL) return;
+  const payload = JSON.stringify({ exportedAt: new Date().toISOString(), notes: NOTES }, null, 0);
+  await blobUpload('portal_notes.json', payload);
 }
 
 async function loadFromAzureBlob() {
@@ -1626,7 +1680,22 @@ async function loadFromAzureBlob() {
       }
     } catch(e) { /* optional file — ignore if absent */ }
 
-    // ── 4. Status bar ──
+    // ── 4. Notes sync — merge remote notes with local notes ──
+    if (sub) sub.textContent = 'Syncing contact notes…';
+    try {
+      const remoteJson = await blobFetch('portal_notes.json');
+      const remoteData = JSON.parse(remoteJson);
+      const remoteNotes = remoteData.notes || remoteData || {};
+      const localNotes  = DataLayer.getNotes();
+      const merged = mergeNotes(localNotes, remoteNotes);
+      NOTES = merged;
+      DataLayer.saveNotes(NOTES);
+    } catch(e) {
+      // No remote notes yet (first run) — local notes are authoritative
+      NOTES = DataLayer.getNotes();
+    }
+
+    // ── 5. Status bar ──
     const loadedStr  = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
     const dsLabel    = document.getElementById('ds-label');
     const lastLoaded = document.getElementById('data-last-loaded');
