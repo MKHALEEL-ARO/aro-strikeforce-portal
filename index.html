@@ -531,8 +531,8 @@ body{font-family:'Titillium Web',Arial,sans-serif;background:var(--ice);color:va
       <div class="sf-tag">⚡ ARO STRIKE FORCE ⚡</div>
     </div>
     <div class="login-err" id="login-err">Invalid username or password.</div>
-    <div class="lf"><label>Username</label><input type="text" id="u-username" placeholder="username" /></div>
-    <div class="lf"><label>Password</label><input type="password" id="u-password" placeholder="••••••••" /></div>
+    <div class="lf"><label>Username</label><input type="text" id="u-username" placeholder="username" onkeydown="if(event.key==='Enter')doLogin()" /></div>
+    <div class="lf"><label>Password</label><input type="password" id="u-password" placeholder="••••••••" onkeydown="if(event.key==='Enter')doLogin()" /></div>
     <button class="btn-primary" onclick="doLogin()">ENTER PORTAL →</button>
   </div>
 </div>
