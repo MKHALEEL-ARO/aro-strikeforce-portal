@@ -894,6 +894,12 @@ body{font-family:'Titillium Web',Arial,sans-serif;background:var(--ice);color:va
    Site URL: https://amrestoration.sharepoint.com/sites/ARO-Collections
    ════════════════════════════════════════════════════════════════ */
 
+// ══ AZURE BLOB DATA RELAY CONFIG ══
+// IT: Replace the placeholder below with the container SAS URL from Step 5 of the IT Setup Guide.
+// Leave as empty string ('') to disable and fall back to Microsoft sign-in or folder picker.
+// Example: 'https://aroportaldata.blob.core.windows.net/portal-data?sv=2023-01-03&sr=c&sp=rl&sig=...'
+const BLOB_SAS_URL = '';
+
 // ══ CONSTANTS ══
 const BRANDS = [
   { id: "E1000",  name: "American Restoration Operations" },
@@ -1530,6 +1536,119 @@ async function loadFromSharePoint() {
   if (refreshBtn) refreshBtn.disabled = false;
 }
 
+// ══ AZURE BLOB STORAGE DATA RELAY ══
+
+// Parse the base URL and SAS query string from BLOB_SAS_URL
+function _blobParts() {
+  if (!BLOB_SAS_URL) return null;
+  const url = new URL(BLOB_SAS_URL);
+  const base = url.origin + url.pathname; // https://account.blob.core.windows.net/container
+  const sas  = url.search;               // ?sv=...&sr=c&sp=rl&sig=...
+  return { base, sas };
+}
+
+// Fetch a single file from the blob container
+async function blobFetch(filePath) {
+  const p = _blobParts();
+  if (!p) throw new Error('BLOB_SAS_URL not configured');
+  // Strip leading ? from sas and rebuild so we can add restype if needed
+  const url = p.base + '/' + filePath + p.sas;
+  const r = await fetch(url);
+  if (!r.ok) throw new Error('Azure Blob fetch failed (' + r.status + ') for ' + filePath);
+  return r.text();
+}
+
+// List files in a blob "folder" (prefix) using the Container List API
+async function blobListPrefix(prefix) {
+  const p = _blobParts();
+  if (!p) return [];
+  // Container list call — adds restype=container&comp=list&prefix=...
+  const sasParams = new URLSearchParams(p.sas.replace(/^\?/,''));
+  sasParams.set('restype','container');
+  sasParams.set('comp','list');
+  sasParams.set('prefix', prefix);
+  const url = p.base + '/?' + sasParams.toString();
+  const r = await fetch(url);
+  if (!r.ok) throw new Error('Azure Blob list failed (' + r.status + ')');
+  const xmlText = await r.text();
+  // Parse XML response — extract blob names
+  const doc   = new DOMParser().parseFromString(xmlText, 'application/xml');
+  const names = Array.from(doc.querySelectorAll('Blob Name')).map(n => n.textContent);
+  return names; // e.g. ["DASH/A&J.csv", "DASH/SMF.csv", ...]
+}
+
+async function loadFromAzureBlob() {
+  const sub = document.getElementById('gh-loader-sub');
+  _showOL('loading');
+  try {
+    // ── 1. AR invoices ──
+    if (sub) sub.textContent = 'Loading AR data from Azure…';
+    const arText = await blobFetch('ar_invoices.csv');
+    parseARText(arText);
+
+    // ── 2. DASH folder ──
+    if (sub) sub.textContent = 'Loading DASH enrichment data…';
+    try {
+      const dashNames = await blobListPrefix('DASH/');
+      const csvNames  = dashNames.filter(n => n.toLowerCase().endsWith('.csv'));
+      DASH_MAP = {};
+      let fileCount = 0, totalRecords = 0;
+      for (const blobName of csvNames) {
+        try {
+          const csvText = await blobFetch(blobName);
+          const headerLine = csvText.substring(0, 1024).split('\n')[0];
+          if (!isDASHHeader(headerLine)) continue;
+          const fname = blobName.split('/').pop();
+          const added = await parseDASHFileIntoMap(csvText, fname);
+          fileCount++;
+          totalRecords += added;
+        } catch(e) { console.warn('DASH blob skip:', blobName, e); }
+      }
+      const statusEl = document.getElementById('dash-status');
+      const dashBar  = document.getElementById('dash-import-bar');
+      if (statusEl) {
+        statusEl.innerHTML = fileCount > 0
+          ? '<span style="color:var(--green)">✓ ' + fileCount + ' file' + (fileCount===1?'':'s') + ' · ' + totalRecords.toLocaleString() + ' records from Azure</span>'
+          : '<span style="color:var(--muted)">No DASH files found in Azure</span>';
+      }
+      if (dashBar) dashBar.style.display = 'flex';
+    } catch(dashErr) {
+      console.warn('DASH Azure load failed:', dashErr);
+    }
+
+    // ── 3. Portal users ──
+    try {
+      const usersJson = await blobFetch('portal_users.json');
+      const data = JSON.parse(usersJson);
+      if (data.users && data.users.length) {
+        USERS = data.users;
+        try { localStorage.setItem('aro_users_v2', JSON.stringify(USERS)); } catch(e) {}
+      }
+    } catch(e) { /* optional file — ignore if absent */ }
+
+    // ── 4. Status bar ──
+    const loadedStr  = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    const dsLabel    = document.getElementById('ds-label');
+    const lastLoaded = document.getElementById('data-last-loaded');
+    const statusBar  = document.getElementById('data-status-bar');
+    if (dsLabel)    dsLabel.textContent = '☁ Azure · ' + loadedStr;
+    if (lastLoaded) lastLoaded.textContent = '☁ Azure Blob Storage  |  Loaded at ' + loadedStr;
+    if (statusBar)  statusBar.style.display = 'flex';
+
+    try { sessionStorage.setItem('aro_blob_mode', '1'); } catch(e) {}
+
+  } catch(err) {
+    _showOL('error');
+    document.getElementById('ol-error-msg').textContent = err.message;
+    const refreshBtn = document.getElementById('btn-refresh-data');
+    if (refreshBtn) refreshBtn.disabled = false;
+    return;
+  }
+  _hideOL();
+  const refreshBtn = document.getElementById('btn-refresh-data');
+  if (refreshBtn) refreshBtn.disabled = false;
+}
+
 // ══ FILE SYSTEM ACCESS API — DATA FOLDER ══
 let DATA_DIR_HANDLE = null;
 
@@ -1625,6 +1744,14 @@ async function initDataFolder() {
   if (refreshBtn) refreshBtn.disabled = true;
   overlay.style.display = 'flex';
 
+  // ── 0. Azure Blob relay — auto-loads for ALL users, no sign-in needed ──
+  if (BLOB_SAS_URL) {
+    _showOL('loading');
+    await loadFromAzureBlob();
+    if (refreshBtn) refreshBtn.disabled = false;
+    return;
+  }
+
   // ── 1. Try silent Microsoft auth (if user was previously signed in this session) ──
   try {
     await initMSAL();
@@ -1648,14 +1775,13 @@ async function initDataFolder() {
       const perm = await stored.queryPermission({ mode: 'readwrite' });
       if (perm === 'granted') {
         DATA_DIR_HANDLE = stored;
-        // Reveal the "Use Previous Folder" shortcut button
         const prevBtn = document.getElementById('btn-use-prev-folder');
         if (prevBtn) prevBtn.style.display = '';
       }
     }
   } catch(e) {}
 
-  // ── 3. Always show connect UI — user must explicitly choose Microsoft or folder ──
+  // ── 3. Show connect UI — user must explicitly choose Microsoft or folder ──
   _showOL('connect');
   if (refreshBtn) refreshBtn.disabled = false;
 }
@@ -1664,6 +1790,18 @@ async function initDataFolder() {
 async function autoLoadFromGitHub(isManualRefresh) {
   const refreshBtn = document.getElementById('btn-refresh-data');
   if (refreshBtn) refreshBtn.disabled = true;
+
+  // ── Azure Blob mode (highest priority) ──
+  if (BLOB_SAS_URL) {
+    if (isManualRefresh) showToast('🔄 Refreshing from Azure…');
+    try {
+      await loadFromAzureBlob();
+    } catch(e) {
+      showToast('⚠️ Azure refresh failed: ' + e.message, false);
+    }
+    if (refreshBtn) refreshBtn.disabled = false;
+    return;
+  }
 
   // ── SharePoint mode: refresh token and reload ──
   if (_msalAccount || sessionStorage.getItem('aro_sp_mode') === '1') {
