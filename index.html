@@ -581,7 +581,15 @@ body{font-family:'Titillium Web',Arial,sans-serif;background:var(--ice);color:va
           <div style="flex:1;height:1px;background:var(--border)"></div>
         </div>
 
-        <!-- Fallback: local folder -->
+        <!-- Fallback: reuse previous folder (shown only if handle is stored) -->
+        <button id="btn-use-prev-folder" onclick="usePrevFolder()"
+          style="display:none;padding:10px 20px;background:var(--ice-dark);color:var(--navy);
+                 border:1px solid var(--border);border-radius:8px;font-family:'Titillium Web',Arial,sans-serif;
+                 font-size:13px;font-weight:700;letter-spacing:1px;cursor:pointer;width:100%;margin-bottom:6px">
+          ↺ Use Previously Selected Folder
+        </button>
+
+        <!-- Fallback: local folder picker -->
         <button onclick="pickDataFolder()"
           style="padding:10px 20px;background:var(--ice-dark);color:var(--navy);border:1px solid var(--border);
                  border-radius:8px;font-family:'Titillium Web',Arial,sans-serif;font-size:13px;
@@ -1593,6 +1601,23 @@ async function pickDataFolder() {
   }
 }
 
+// ── Use the previously stored folder handle (user gesture required for requestPermission) ──
+async function usePrevFolder() {
+  if (!DATA_DIR_HANDLE) return;
+  try {
+    const perm = await DATA_DIR_HANDLE.requestPermission({ mode: 'readwrite' });
+    if (perm === 'granted') {
+      _showOL('loading');
+      await findAndLoadFiles(DATA_DIR_HANDLE);
+    } else {
+      showToast('⚠️ Folder access denied. Please select the folder again.', false);
+    }
+  } catch(e) {
+    _showOL('error');
+    document.getElementById('ol-error-msg').textContent = e.message;
+  }
+}
+
 // ── Main entry point after login ──
 async function initDataFolder() {
   const overlay = document.getElementById('gh-loading-overlay');
@@ -1616,22 +1641,21 @@ async function initDataFolder() {
     console.warn('Silent MSAL init failed:', e);
   }
 
-  // ── 2. Try stored folder handle ──
-  const stored = await _loadHandle();
-  if (stored) {
-    try {
+  // ── 2. Check for stored folder handle (surface as option, don't auto-load) ──
+  try {
+    const stored = await _loadHandle();
+    if (stored) {
       const perm = await stored.queryPermission({ mode: 'readwrite' });
       if (perm === 'granted') {
         DATA_DIR_HANDLE = stored;
-        _showOL('loading');
-        await findAndLoadFiles(stored);
-        return;
+        // Reveal the "Use Previous Folder" shortcut button
+        const prevBtn = document.getElementById('btn-use-prev-folder');
+        if (prevBtn) prevBtn.style.display = '';
       }
-      // Need re-grant — fall through to connect UI
-    } catch(e) {}
-  }
+    }
+  } catch(e) {}
 
-  // ── 3. Show connect UI ──
+  // ── 3. Always show connect UI — user must explicitly choose Microsoft or folder ──
   _showOL('connect');
   if (refreshBtn) refreshBtn.disabled = false;
 }
