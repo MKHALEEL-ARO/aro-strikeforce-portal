@@ -6,6 +6,7 @@
 <title>ARO Strike Force — Collections Portal</title>
 <link href="https://fonts.googleapis.com/css2?family=Russo+One&family=Titillium+Web:wght@300;400;600;700;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
 <style>
 /* ── RESET & VARS ── */
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -555,11 +556,39 @@ body{font-family:'Titillium Web',Arial,sans-serif;background:var(--ice);color:va
     <div class="gh-loader-box">
       <!-- Connect folder state -->
       <div id="ol-connect-state">
-        <div style="font-size:36px;margin-bottom:12px">📁</div>
-        <div class="gh-loader-title">CONNECT DATA FOLDER</div>
-        <div class="gh-loader-sub" style="margin-bottom:20px">Select the <strong>Claude reports</strong> folder in OneDrive to load AR &amp; DASH data automatically.</div>
-        <button onclick="pickDataFolder()" style="padding:11px 28px;background:var(--navy);color:#fff;border:none;border-radius:8px;font-family:'Russo One',Arial,sans-serif;font-size:13px;font-weight:800;letter-spacing:2px;cursor:pointer;width:100%">SELECT FOLDER</button>
-        <div style="font-size:12px;color:var(--muted);margin-top:10px">You'll only need to do this once.</div>
+        <div style="font-size:36px;margin-bottom:12px">☁️</div>
+        <div class="gh-loader-title">CONNECT TO DATA</div>
+        <div class="gh-loader-sub" style="margin-bottom:20px">Sign in with your Microsoft account to load AR &amp; DASH data automatically from SharePoint.</div>
+
+        <!-- Primary: Microsoft/SharePoint -->
+        <button onclick="connectMicrosoft()" id="btn-ms-signin"
+          style="display:flex;align-items:center;justify-content:center;gap:10px;
+                 padding:12px 20px;background:#0078d4;color:#fff;border:none;
+                 border-radius:8px;font-family:'Russo One',Arial,sans-serif;
+                 font-size:13px;font-weight:800;letter-spacing:2px;cursor:pointer;
+                 width:100%;margin-bottom:10px;transition:background .2s;">
+          <svg width="18" height="18" viewBox="0 0 21 21" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="1" y="1" width="9" height="9" fill="#f25022"/><rect x="11" y="1" width="9" height="9" fill="#7fba00"/>
+            <rect x="1" y="11" width="9" height="9" fill="#00a4ef"/><rect x="11" y="11" width="9" height="9" fill="#ffb900"/>
+          </svg>
+          SIGN IN WITH MICROSOFT
+        </button>
+
+        <!-- Divider -->
+        <div style="display:flex;align-items:center;gap:8px;margin:10px 0;">
+          <div style="flex:1;height:1px;background:var(--border)"></div>
+          <span style="font-size:11px;color:var(--muted);font-weight:600;letter-spacing:1px;">OR</span>
+          <div style="flex:1;height:1px;background:var(--border)"></div>
+        </div>
+
+        <!-- Fallback: local folder -->
+        <button onclick="pickDataFolder()"
+          style="padding:10px 20px;background:var(--ice-dark);color:var(--navy);border:1px solid var(--border);
+                 border-radius:8px;font-family:'Titillium Web',Arial,sans-serif;font-size:13px;
+                 font-weight:700;letter-spacing:1px;cursor:pointer;width:100%">
+          📁 Select Local Folder
+        </button>
+        <div style="font-size:11px;color:var(--muted);margin-top:8px">Use local folder if SharePoint access is not set up.</div>
       </div>
       <!-- Loading state -->
       <div id="ol-loading-state" style="display:none">
@@ -572,7 +601,10 @@ body{font-family:'Titillium Web',Arial,sans-serif;background:var(--ice);color:va
         <div style="font-size:32px;margin-bottom:12px">⚠️</div>
         <div class="gh-loader-title" style="color:#c0392b">COULD NOT LOAD DATA</div>
         <div class="gh-loader-sub" id="ol-error-msg" style="margin-bottom:16px"></div>
-        <button onclick="pickDataFolder()" style="padding:9px 24px;background:var(--navy);color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:700;letter-spacing:1px;cursor:pointer">TRY DIFFERENT FOLDER</button>
+        <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+          <button onclick="connectMicrosoft()" style="padding:9px 18px;background:#0078d4;color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:700;letter-spacing:1px;cursor:pointer">↺ Retry Microsoft Sign-In</button>
+          <button onclick="pickDataFolder()" style="padding:9px 18px;background:var(--navy);color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:700;letter-spacing:1px;cursor:pointer">📁 Try Local Folder</button>
+        </div>
       </div>
     </div>
   </div>
@@ -1266,6 +1298,230 @@ function renderBrandSummary() {
   document.getElementById('summary-tbody').innerHTML = detailRows.join('');
 }
 
+// ══ SHAREPOINT / MSAL INTEGRATION ══
+const SP_CONFIG = {
+  clientId:   '15a0aa8d-8573-4996-a3dd-01486bf9752d',
+  tenantId:   'f1f5d0ff-73c9-4fbd-bade-619b3b2b20a1',
+  redirectUri: window.location.origin + window.location.pathname,
+  siteHost:   'amrestoration.sharepoint.com',
+  sitePath:   '/sites/ARO-Collections',
+  dataPath:   'Shared Documents/PortalData',
+  dashPath:   'Shared Documents/PortalData/DASH',
+};
+
+let _msalApp      = null;
+let _msalAccount  = null;
+let _spSiteId     = null;  // cached after first fetch
+
+async function initMSAL() {
+  if (_msalApp) return _msalApp;
+  _msalApp = new msal.PublicClientApplication({
+    auth: {
+      clientId:   SP_CONFIG.clientId,
+      authority:  'https://login.microsoftonline.com/' + SP_CONFIG.tenantId,
+      redirectUri: SP_CONFIG.redirectUri,
+    },
+    cache: { cacheLocation: 'sessionStorage', storeAuthStateInCookie: false },
+  });
+  await _msalApp.initialize();
+  // Handle redirect response (called on every page load)
+  await _msalApp.handleRedirectPromise();
+  // Pick first cached account if any
+  const accounts = _msalApp.getAllAccounts();
+  if (accounts.length) _msalAccount = accounts[0];
+  return _msalApp;
+}
+
+async function getSPToken() {
+  const app = await initMSAL();
+  const scopes = ['https://graph.microsoft.com/Sites.Selected',
+                  'https://graph.microsoft.com/Files.ReadWrite'];
+  const req = { scopes, account: _msalAccount };
+  try {
+    const result = await app.acquireTokenSilent(req);
+    _msalAccount = result.account;
+    return result.accessToken;
+  } catch(e) {
+    if (e instanceof msal.InteractionRequiredAuthError) {
+      const result = await app.acquireTokenPopup(req);
+      _msalAccount = result.account;
+      return result.accessToken;
+    }
+    throw e;
+  }
+}
+
+async function loginWithMicrosoft() {
+  const app = await initMSAL();
+  const scopes = ['https://graph.microsoft.com/Sites.Selected',
+                  'https://graph.microsoft.com/Files.ReadWrite'];
+  try {
+    const result = await app.loginPopup({ scopes });
+    _msalAccount = result.account;
+    return result.accessToken;
+  } catch(e) {
+    if (e.name === 'BrowserAuthError' && e.errorCode === 'popup_window_error') {
+      throw new Error('Popup was blocked. Please allow popups for this site and try again.');
+    }
+    throw e;
+  }
+}
+
+async function msalSignOut() {
+  if (!_msalApp) return;
+  await _msalApp.logoutPopup({ account: _msalAccount });
+  _msalAccount = null;
+}
+
+async function graphFetch(path, token) {
+  const r = await fetch('https://graph.microsoft.com/v1.0' + path, {
+    headers: { Authorization: 'Bearer ' + token }
+  });
+  if (!r.ok) {
+    const body = await r.text().catch(()=>'');
+    throw new Error('Graph API error ' + r.status + ': ' + body.substring(0, 200));
+  }
+  return r.json();
+}
+
+async function graphFetchRaw(path, token) {
+  const r = await fetch('https://graph.microsoft.com/v1.0' + path, {
+    headers: { Authorization: 'Bearer ' + token }
+  });
+  if (!r.ok) {
+    const body = await r.text().catch(()=>'');
+    throw new Error('Graph API error ' + r.status + ': ' + body.substring(0, 200));
+  }
+  return r.text();
+}
+
+async function getSPSiteId(token) {
+  if (_spSiteId) return _spSiteId;
+  const data = await graphFetch('/sites/' + SP_CONFIG.siteHost + ':' + SP_CONFIG.sitePath, token);
+  _spSiteId = data.id;
+  return _spSiteId;
+}
+
+// Download a file from SharePoint by its path inside the site drive
+async function spDownloadFile(token, filePath) {
+  const siteId = await getSPSiteId(token);
+  // Graph path: /sites/{siteId}/drive/root:/{path}:/content
+  const graphPath = '/sites/' + siteId + '/drive/root:/' + encodeURIComponent(filePath).replace(/%2F/g,'/') + ':/content';
+  const r = await fetch('https://graph.microsoft.com/v1.0' + graphPath, {
+    headers: { Authorization: 'Bearer ' + token }
+  });
+  if (!r.ok) {
+    const body = await r.text().catch(()=>'');
+    throw new Error('Could not download ' + filePath + ' — ' + r.status + ': ' + body.substring(0, 150));
+  }
+  return r.text();
+}
+
+// List files in a SharePoint folder
+async function spListFolder(token, folderPath) {
+  const siteId = await getSPSiteId(token);
+  const graphPath = '/sites/' + siteId + '/drive/root:/' + encodeURIComponent(folderPath).replace(/%2F/g,'/') + ':/children';
+  const data = await graphFetch(graphPath, token);
+  return data.value || [];
+}
+
+async function loadFromSharePoint() {
+  const sub = document.getElementById('gh-loader-sub');
+  _showOL('loading');
+
+  let token;
+  try {
+    if (sub) sub.textContent = 'Signing in to Microsoft…';
+    // Try silent first; if needed, popup will appear
+    token = await getSPToken();
+  } catch(e) {
+    _showOL('error');
+    document.getElementById('ol-error-msg').textContent = 'Microsoft sign-in failed: ' + e.message;
+    return;
+  }
+
+  try {
+    // ── 1. Load AR invoices ──
+    if (sub) sub.textContent = 'Loading AR data from SharePoint…';
+    const arText = await spDownloadFile(token, SP_CONFIG.dataPath + '/ar_invoices.csv');
+    parseARText(arText);
+
+    // ── 2. Load DASH files from PortalData/DASH/ ──
+    if (sub) sub.textContent = 'Loading DASH enrichment data…';
+    try {
+      const dashFiles = await spListFolder(token, SP_CONFIG.dashPath);
+      const csvFiles  = dashFiles.filter(f => f.name && f.name.toLowerCase().endsWith('.csv'));
+      DASH_MAP = {};
+      let fileCount = 0, totalRecords = 0;
+      for (const entry of csvFiles) {
+        try {
+          const graphPath = '/sites/' + _spSiteId + '/drive/items/' + entry.id + '/content';
+          const r = await fetch('https://graph.microsoft.com/v1.0' + graphPath, {
+            headers: { Authorization: 'Bearer ' + token }
+          });
+          if (!r.ok) continue;
+          const csvText = await r.text();
+          const peek = csvText.substring(0, 1024);
+          const headerLine = peek.split('\n')[0];
+          if (!isDASHHeader(headerLine)) continue;
+          const added = await parseDASHFileIntoMap(csvText, entry.name);
+          fileCount++;
+          totalRecords += added;
+        } catch(e) { console.warn('DASH file skip:', entry.name, e); }
+      }
+      // Update DASH status bar
+      const statusEl = document.getElementById('dash-status');
+      const dashBar  = document.getElementById('dash-import-bar');
+      if (statusEl) {
+        if (fileCount > 0) {
+          statusEl.innerHTML = '<span style="color:var(--green)">✓ ' + fileCount + ' file' + (fileCount===1?'':'s') + ' · ' + totalRecords.toLocaleString() + ' records from SharePoint</span>';
+        } else {
+          statusEl.innerHTML = '<span style="color:var(--muted)">No DASH files found in SharePoint</span>';
+        }
+      }
+      if (dashBar) dashBar.style.display = 'flex';
+    } catch(dashErr) {
+      console.warn('DASH load from SP failed:', dashErr);
+      const statusEl = document.getElementById('dash-status');
+      if (statusEl) statusEl.innerHTML = '<span style="color:var(--muted)">DASH not available via SharePoint</span>';
+    }
+
+    // ── 3. Load portal users ──
+    try {
+      const usersJson = await spDownloadFile(token, SP_CONFIG.dataPath + '/portal_users.json');
+      const data = JSON.parse(usersJson);
+      if (data.users && data.users.length) {
+        USERS = data.users;
+        try { localStorage.setItem('aro_users_v2', JSON.stringify(USERS)); } catch(e) {}
+      }
+    } catch(e) { console.warn('portal_users.json not found in SP:', e); }
+
+    // ── 4. Update status bar ──
+    const loadedStr = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    const dsLabel   = document.getElementById('ds-label');
+    const lastLoaded = document.getElementById('data-last-loaded');
+    const statusBar  = document.getElementById('data-status-bar');
+    const displayName = _msalAccount ? _msalAccount.name || _msalAccount.username : 'Microsoft';
+    if (dsLabel)    dsLabel.textContent = '☁ SharePoint · ' + loadedStr;
+    if (lastLoaded) lastLoaded.textContent = '☁ SharePoint (ARO-Collections)  |  Loaded at ' + loadedStr + '  |  Signed in as: ' + displayName;
+    if (statusBar)  statusBar.style.display = 'flex';
+
+    // ── 5. Store SP mode flag so refresh button works ──
+    try { sessionStorage.setItem('aro_sp_mode', '1'); } catch(e) {}
+
+  } catch(err) {
+    _showOL('error');
+    document.getElementById('ol-error-msg').textContent = err.message;
+    const refreshBtn = document.getElementById('btn-refresh-data');
+    if (refreshBtn) refreshBtn.disabled = false;
+    return;
+  }
+
+  _hideOL();
+  const refreshBtn = document.getElementById('btn-refresh-data');
+  if (refreshBtn) refreshBtn.disabled = false;
+}
+
 // ══ FILE SYSTEM ACCESS API — DATA FOLDER ══
 let DATA_DIR_HANDLE = null;
 
@@ -1309,6 +1565,22 @@ function _showOL(state) {
 }
 function _hideOL() { document.getElementById('gh-loading-overlay').style.display = 'none'; }
 
+// ── Microsoft sign-in button handler (requires user gesture) ──
+async function connectMicrosoft() {
+  const btn = document.getElementById('btn-ms-signin');
+  if (btn) { btn.disabled = true; btn.textContent = 'Signing in…'; }
+  try {
+    await loginWithMicrosoft();
+    await loadFromSharePoint();
+  } catch(e) {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 21 21" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="1" y="1" width="9" height="9" fill="#f25022"/><rect x="11" y="1" width="9" height="9" fill="#7fba00"/><rect x="1" y="11" width="9" height="9" fill="#00a4ef"/><rect x="11" y="11" width="9" height="9" fill="#ffb900"/></svg> SIGN IN WITH MICROSOFT'; }
+    if (e.name !== 'BrowserAuthError' || e.errorCode !== 'user_cancelled') {
+      _showOL('error');
+      document.getElementById('ol-error-msg').textContent = e.message;
+    }
+  }
+}
+
 // ── User picks a folder ──
 async function pickDataFolder() {
   try {
@@ -1328,7 +1600,23 @@ async function initDataFolder() {
   if (refreshBtn) refreshBtn.disabled = true;
   overlay.style.display = 'flex';
 
-  // Try stored handle
+  // ── 1. Try silent Microsoft auth (if user was previously signed in this session) ──
+  try {
+    await initMSAL();
+    const accounts = _msalApp ? _msalApp.getAllAccounts() : [];
+    if (accounts.length > 0) {
+      _msalAccount = accounts[0];
+      _showOL('loading');
+      const sub = document.getElementById('gh-loader-sub');
+      if (sub) sub.textContent = 'Reconnecting to SharePoint…';
+      await loadFromSharePoint();
+      return;
+    }
+  } catch(e) {
+    console.warn('Silent MSAL init failed:', e);
+  }
+
+  // ── 2. Try stored folder handle ──
   const stored = await _loadHandle();
   if (stored) {
     try {
@@ -1339,23 +1627,35 @@ async function initDataFolder() {
         await findAndLoadFiles(stored);
         return;
       }
-      // Need to re-request (requires user gesture — show connect state)
+      // Need re-grant — fall through to connect UI
     } catch(e) {}
   }
-  // No handle or needs re-grant — show connect UI
+
+  // ── 3. Show connect UI ──
   _showOL('connect');
   if (refreshBtn) refreshBtn.disabled = false;
 }
 
 // ── Re-grant permission (needs user gesture) then load ──
 async function autoLoadFromGitHub(isManualRefresh) {
-  // Renamed entry point kept for compatibility — delegates to folder system
   const refreshBtn = document.getElementById('btn-refresh-data');
   if (refreshBtn) refreshBtn.disabled = true;
-  if (isManualRefresh) showToast('🔄 Refreshing from data folder…');
 
+  // ── SharePoint mode: refresh token and reload ──
+  if (_msalAccount || sessionStorage.getItem('aro_sp_mode') === '1') {
+    if (isManualRefresh) showToast('🔄 Refreshing from SharePoint…');
+    try {
+      await loadFromSharePoint();
+    } catch(e) {
+      showToast('⚠️ SharePoint refresh failed: ' + e.message, false);
+    }
+    if (refreshBtn) refreshBtn.disabled = false;
+    return;
+  }
+
+  // ── Local folder mode ──
+  if (isManualRefresh) showToast('🔄 Refreshing from data folder…');
   if (DATA_DIR_HANDLE) {
-    // Re-request permission if needed (requires user gesture on manual refresh)
     const perm = await DATA_DIR_HANDLE.requestPermission({ mode: 'readwrite' });
     if (perm === 'granted') {
       _showOL('loading');
