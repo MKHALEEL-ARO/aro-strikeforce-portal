@@ -1708,6 +1708,7 @@ async function blobUpload(filePath, content) {
 // ── Merge two notes objects — deduplicates by (by + date + ts + first 30 chars of text) ──
 function mergeNotes(localNotes, remoteNotes) {
   const merged = {};
+  const deletedFPs = _getDeletedNoteFPs(); // skip notes the user explicitly deleted
   const allIds = new Set([...Object.keys(localNotes||{}), ...Object.keys(remoteNotes||{})]);
   for (const id of allIds) {
     const local  = (localNotes||{})[id]  || [];
@@ -1717,7 +1718,7 @@ function mergeNotes(localNotes, remoteNotes) {
     // Remote first so local changes take precedence in dedup
     for (const note of [...remote, ...local]) {
       const fp = (note.by||'') + '|' + (note.date||'') + '|' + (note.ts||'') + '|' + (note.notes||'').substring(0,30);
-      if (!seen.has(fp)) { seen.add(fp); combined.push(note); }
+      if (!seen.has(fp) && !deletedFPs.has(fp)) { seen.add(fp); combined.push(note); }
     }
     // Sort chronologically
     combined.sort((a,b) => {
@@ -3675,12 +3676,28 @@ function deleteUser(id){
 function deleteNote(acctId, origIdx){
   if(!confirm('Delete this note? This cannot be undone.')) return;
   if(!NOTES[acctId] || origIdx < 0 || origIdx >= NOTES[acctId].length) return;
+  // Record the deleted note's fingerprint so mergeNotes won't resurrect it from blob
+  const note = NOTES[acctId][origIdx];
+  const fp = (note.by||'') + '|' + (note.date||'') + '|' + (note.ts||'') + '|' + (note.notes||'').substring(0,30);
+  _addDeletedNoteFP(fp);
   NOTES[acctId].splice(origIdx, 1);
   if(NOTES[acctId].length === 0) delete NOTES[acctId];
   DataLayer.saveNotes(NOTES);
+  _acctCacheStamp = 0; // invalidate cache
   showToast('Note deleted');
   renderNotePanel();
   renderAccounts();
+}
+
+// ── Deleted-note fingerprint log — prevents mergeNotes from resurrecting deleted notes ──
+const _DELETED_FP_KEY = 'aro_deleted_note_fps';
+function _getDeletedNoteFPs() {
+  try { return new Set(JSON.parse(localStorage.getItem(_DELETED_FP_KEY) || '[]')); } catch(e) { return new Set(); }
+}
+function _addDeletedNoteFP(fp) {
+  const set = _getDeletedNoteFPs();
+  set.add(fp);
+  try { localStorage.setItem(_DELETED_FP_KEY, JSON.stringify([...set])); } catch(e) {}
 }
 
 // ══ UTILITIES ══
