@@ -1743,7 +1743,8 @@ async function loadFromAzureBlob() {
         .sort();
       if (arFiles.length === 0) throw new Error('No AR transaction summary files found in Azure');
       let arHeader = '';
-      let arDataRows = [];
+      let arDataMap = new Map(); // keyed by Record number to deduplicate across years
+      let recNumIdx = -1;
       for (const arFile of arFiles) {
         if (sub) sub.textContent = 'Loading ' + arFile + '…';
         const csvText = await blobFetch(arFile);
@@ -1751,12 +1752,24 @@ async function loadFromAzureBlob() {
         if (lines.length === 0) continue;
         if (!arHeader) {
           arHeader = lines[0];
-          arDataRows.push(arHeader);
+          // Find the "Record number" column index for dedup key
+          const cols = arHeader.split(',').map(c => c.replace(/^"|"$/g,'').trim());
+          recNumIdx = cols.findIndex(c => c.toLowerCase() === 'record number');
         }
         for (let i = 1; i < lines.length; i++) {
-          if (lines[i].trim()) arDataRows.push(lines[i]);
+          const line = lines[i].trim();
+          if (!line) continue;
+          // Extract Record number as dedup key — later year files overwrite earlier ones
+          let key = i + '_' + arFile; // fallback unique key
+          if (recNumIdx >= 0) {
+            const cols = line.split(',');
+            const recNum = (cols[recNumIdx] || '').replace(/^"|"$/g,'').trim();
+            if (recNum) key = recNum;
+          }
+          arDataMap.set(key, line);
         }
       }
+      const arDataRows = [arHeader, ...arDataMap.values()];
       combinedAR = arDataRows.join('\n');
 
       // ── 2a. DASH / Job insurance and adjustor files ──
