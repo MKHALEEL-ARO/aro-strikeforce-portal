@@ -912,7 +912,7 @@ body{font-family:'Titillium Web',Arial,sans-serif;background:var(--ice);color:va
 // IT: Replace the placeholder below with the container SAS URL from Step 5 of the IT Setup Guide.
 // Leave as empty string ('') to disable and fall back to Microsoft sign-in or folder picker.
 // Example: 'https://aroportaldata.blob.core.windows.net/portal-data?sv=2023-01-03&sr=c&sp=rl&sig=...'
-const BLOB_SAS_URL = '';
+const BLOB_SAS_URL = 'https://saarocollectionsportal.blob.core.windows.net/portal-data/portal-data?sv=2020-02-10&spr=https&st=2026-03-16T16%3A24%3A50Z&se=2027-12-18T05%3A24%3A00Z&sr=d&sp=rwdl&sig=lh4WnA%2FD8ihRcDD8nt5m%2FYhi2Exn865Ca00hZhfRPX0%3D&sdd=1';
 
 // ══ CONSTANTS ══
 const BRANDS = [
@@ -1566,9 +1566,14 @@ async function loadFromSharePoint() {
 function _blobParts() {
   if (!BLOB_SAS_URL) return null;
   const url = new URL(BLOB_SAS_URL);
-  const base = url.origin + url.pathname; // https://account.blob.core.windows.net/container
-  const sas  = url.search;               // ?sv=...&sr=c&sp=rl&sig=...
-  return { base, sas };
+  const base = url.origin + url.pathname; // e.g. .../portal-data/portal-data
+  const sas  = url.search;               // ?sv=...&sr=d&sp=rwdl&sig=...
+  // For directory-level SAS (sr=d, sdd=1) we need container URL for list ops
+  const pathParts   = url.pathname.split('/').filter(Boolean); // ['portal-data','portal-data']
+  const container   = pathParts[0] || '';
+  const dirPrefix   = pathParts.slice(1).join('/'); // 'portal-data' (dir inside container)
+  const containerUrl = url.origin + '/' + container; // https://...blob.../portal-data
+  return { base, sas, containerUrl, dirPrefix };
 }
 
 // Fetch a single file from the blob container
@@ -1585,19 +1590,23 @@ async function blobFetch(filePath) {
 async function blobListPrefix(prefix) {
   const p = _blobParts();
   if (!p) return [];
-  // Container list call — adds restype=container&comp=list&prefix=...
+  // Container list call — must hit container URL (not directory URL)
   const sasParams = new URLSearchParams(p.sas.replace(/^\?/,''));
   sasParams.set('restype','container');
   sasParams.set('comp','list');
-  sasParams.set('prefix', prefix);
-  const url = p.base + '/?' + sasParams.toString();
+  // For directory SAS, prepend the directory path to the prefix
+  const fullPrefix = p.dirPrefix ? p.dirPrefix + '/' + prefix : prefix;
+  sasParams.set('prefix', fullPrefix);
+  const url = p.containerUrl + '?' + sasParams.toString();
   const r = await fetch(url);
   if (!r.ok) throw new Error('Azure Blob list failed (' + r.status + ')');
   const xmlText = await r.text();
   // Parse XML response — extract blob names
   const doc   = new DOMParser().parseFromString(xmlText, 'application/xml');
   const names = Array.from(doc.querySelectorAll('Blob Name')).map(n => n.textContent);
-  return names; // e.g. ["DASH/A&J.csv", "DASH/SMF.csv", ...]
+  // Strip directory prefix so callers see relative paths (e.g. "DASH/A&J.csv")
+  const strip = p.dirPrefix ? p.dirPrefix + '/' : '';
+  return names.map(n => n.startsWith(strip) ? n.substring(strip.length) : n);
 }
 
 // ── Upload a file to blob container (requires Write permission on SAS) ──
