@@ -1580,7 +1580,9 @@ function _blobParts() {
 async function blobFetch(filePath) {
   const p = _blobParts();
   if (!p) throw new Error('BLOB_SAS_URL not configured');
-  const url = p.base + '/' + filePath + p.sas;
+  // URL-encode each path segment (handles spaces & special chars in filenames)
+  const encoded = filePath.split('/').map(s => encodeURIComponent(s)).join('/');
+  const url = p.base + '/' + encoded + p.sas;
   const r = await fetch(url);
   if (!r.ok) throw new Error('Azure Blob fetch failed (' + r.status + ') for ' + filePath);
   return r.text();
@@ -1613,7 +1615,8 @@ async function blobListPrefix(prefix) {
 async function blobUpload(filePath, content) {
   const p = _blobParts();
   if (!p) return;
-  const url = p.base + '/' + filePath + p.sas;
+  const encoded = filePath.split('/').map(s => encodeURIComponent(s)).join('/');
+  const url = p.base + '/' + encoded + p.sas;
   const r = await fetch(url, {
     method: 'PUT',
     headers: {
@@ -1664,19 +1667,57 @@ async function loadFromAzureBlob() {
   const sub = document.getElementById('gh-loader-sub');
   _showOL('loading');
   try {
-    // ── 1. AR invoices ──
-    if (sub) sub.textContent = 'Loading AR data from Azure…';
-    const arText = await blobFetch('ar_invoices.csv');
-    parseARText(arText);
+    // ── 0. List all blobs in the directory to discover AR + DASH files ──
+    if (sub) sub.textContent = 'Discovering files in Azure…';
+    const allBlobs = await blobListPrefix('');
 
-    // ── 2. DASH folder ──
+    // ── 1. AR invoices — combine all "AR transaction summary *.csv" files ──
+    if (sub) sub.textContent = 'Loading AR data from Azure…';
+    const arFiles = allBlobs
+      .filter(n => n.toLowerCase().startsWith('ar transaction summary') && n.toLowerCase().endsWith('.csv'))
+      .sort(); // chronological: 2000-2022, 2023, 2024, 2025, 2026
+    if (arFiles.length === 0) throw new Error('No AR transaction summary files found in Azure');
+    let arHeader = '';
+    let arDataRows = [];
+    for (const arFile of arFiles) {
+      if (sub) sub.textContent = 'Loading ' + arFile + '…';
+      const csvText = await blobFetch(arFile);
+      const lines = csvText.trim().split('\n');
+      if (lines.length === 0) continue;
+      if (!arHeader) {
+        arHeader = lines[0];
+        arDataRows.push(arHeader);
+      }
+      // Append data rows (skip header line of each file)
+      for (let i = 1; i < lines.length; i++) {
+        if (lines[i].trim()) arDataRows.push(lines[i]);
+      }
+    }
+    const combinedAR = arDataRows.join('\n');
+    parseARText(combinedAR);
+
+    // ── 2. DASH / Job insurance and adjustor files ──
     if (sub) sub.textContent = 'Loading DASH enrichment data…';
     try {
-      const dashNames = await blobListPrefix('DASH/');
-      const csvNames  = dashNames.filter(n => n.toLowerCase().endsWith('.csv'));
+      const dashFiles = allBlobs
+        .filter(n => n.toLowerCase().startsWith('job insurance and adjust') && n.toLowerCase().endsWith('.csv'));
       DASH_MAP = {};
       let fileCount = 0, totalRecords = 0;
-      for (const blobName of csvNames) {
+      for (const blobName of dashFiles) {
+        try {
+          if (sub) sub.textContent = 'Loading ' + blobName + '…';
+          const csvText = await blobFetch(blobName);
+          const headerLine = csvText.substring(0, 1024).split('\n')[0];
+          if (!isDASHHeader(headerLine)) continue;
+          const added = await parseDASHFileIntoMap(csvText, blobName);
+          fileCount++;
+          totalRecords += added;
+        } catch(e) { console.warn('DASH blob skip:', blobName, e); }
+      }
+      // Also check DASH/ subfolder if it exists
+      const dashSubFiles = allBlobs
+        .filter(n => n.toLowerCase().startsWith('dash/') && n.toLowerCase().endsWith('.csv'));
+      for (const blobName of dashSubFiles) {
         try {
           const csvText = await blobFetch(blobName);
           const headerLine = csvText.substring(0, 1024).split('\n')[0];
@@ -1685,7 +1726,7 @@ async function loadFromAzureBlob() {
           const added = await parseDASHFileIntoMap(csvText, fname);
           fileCount++;
           totalRecords += added;
-        } catch(e) { console.warn('DASH blob skip:', blobName, e); }
+        } catch(e) { console.warn('DASH subfolder blob skip:', blobName, e); }
       }
       const statusEl = document.getElementById('dash-status');
       const dashBar  = document.getElementById('dash-import-bar');
