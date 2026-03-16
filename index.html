@@ -787,6 +787,17 @@ body{font-family:'Titillium Web',Arial,sans-serif;background:var(--ice);color:va
 
     <div class="divider" style="margin:28px 0"></div>
     <div class="sec-hdr" style="margin-bottom:16px">
+      <div class="sec-title">📧 Daily Briefing Email</div>
+    </div>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:12px;max-width:640px">
+      A daily AR collections briefing is automatically emailed to <strong>mkhaleel@amrestoration.com</strong> on first admin login each day.
+      The briefing includes aging snapshot, prior-day audit trail, collector activity, status changes, and top open balances.
+    </p>
+    <button class="btn-save-bonus" style="background:var(--green);width:auto;padding:10px 24px" onclick="manualSendBriefing()">📧 Send Today's Briefing Now</button>
+    <span id="briefing-status" style="margin-left:12px;font-size:12px;color:var(--muted)"></span>
+
+    <div class="divider" style="margin:28px 0"></div>
+    <div class="sec-hdr" style="margin-bottom:16px">
       <div class="sec-title">Campaign Settings</div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;max-width:720px">
@@ -1414,7 +1425,8 @@ async function initMSAL() {
 async function getSPToken() {
   const app = await initMSAL();
   const scopes = ['https://graph.microsoft.com/Sites.Selected',
-                  'https://graph.microsoft.com/Files.ReadWrite'];
+                  'https://graph.microsoft.com/Files.ReadWrite',
+                  'https://graph.microsoft.com/Mail.Send'];
   const req = { scopes, account: _msalAccount };
   try {
     const result = await app.acquireTokenSilent(req);
@@ -1433,7 +1445,8 @@ async function getSPToken() {
 async function loginWithMicrosoft() {
   const app = await initMSAL();
   const scopes = ['https://graph.microsoft.com/Sites.Selected',
-                  'https://graph.microsoft.com/Files.ReadWrite'];
+                  'https://graph.microsoft.com/Files.ReadWrite',
+                  'https://graph.microsoft.com/Mail.Send'];
   try {
     const result = await app.loginPopup({ scopes });
     _msalAccount = result.account;
@@ -1702,6 +1715,333 @@ async function blobSyncNotes() {
   if (!BLOB_SAS_URL) return;
   const payload = JSON.stringify({ exportedAt: new Date().toISOString(), notes: NOTES }, null, 0);
   await blobUpload('portal_notes.json', payload);
+}
+
+// ══ DAILY BRIEFING ENGINE ══
+// Auto-sends a morning AR collections briefing email on first admin login each day
+
+const BRIEFING_RECIPIENT = 'mkhaleel@amrestoration.com';
+
+async function checkAndSendBriefing() {
+  // Only admins trigger the briefing
+  if (!currentUser || currentUser.role !== 'admin') return;
+  if (!BLOB_SAS_URL) return;
+  if (!ACCOUNTS.length) return;
+
+  const today = new Date().toISOString().slice(0, 10);
+  const flagFile = 'briefing_' + today + '.json';
+
+  // Check if briefing was already sent today
+  try {
+    await blobFetch(flagFile);
+    console.log('Briefing already sent today (' + today + ')');
+    return; // flag exists — already sent
+  } catch(e) {
+    // 404 = not sent yet, proceed
+  }
+
+  try {
+    const briefingHtml = generateDailyBriefing(today);
+    await sendBriefingEmail(today, briefingHtml);
+    // Save flag to blob so it doesn't re-send
+    await blobUpload(flagFile, JSON.stringify({ sentAt: new Date().toISOString(), sentBy: currentUser.name }));
+    // Save today's snapshot for tomorrow's comparison
+    const snapshot = {};
+    ACCOUNTS.forEach(a => { snapshot[a.id] = { balance: a.balance, payStatus: a.payStatus }; });
+    await blobUpload('briefing_snapshot.json', JSON.stringify({ date: today, accounts: snapshot }));
+    showToast('📧 Daily briefing sent to ' + BRIEFING_RECIPIENT);
+  } catch(e) {
+    console.warn('Daily briefing failed:', e);
+    // Don't block the app — briefing is best-effort
+  }
+}
+
+function generateDailyBriefing(today) {
+  const yesterday = _getPriorBusinessDay(today);
+  const brandMap  = Object.fromEntries(BRANDS.map(b => [b.id, b.name]));
+  const now       = Date.now();
+
+  // ── 1. Aging snapshot ──
+  const buckets = [
+    { label: '0–30',    min: 1,   max: 30 },
+    { label: '31–60',   min: 31,  max: 60 },
+    { label: '61–90',   min: 61,  max: 90 },
+    { label: '91–120',  min: 91,  max: 120 },
+    { label: '121–180', min: 121, max: 180 },
+    { label: '181–365', min: 181, max: 365 },
+    { label: '366+',    min: 366, max: 999999 }
+  ];
+  const bktColors = ['#9a6200','#c85000','#cc2233','#bb0011','#990011','#78003c','#500028'];
+  const agingData = buckets.map(() => ({ count: 0, amount: 0 }));
+  let totalOpen = 0, totalOpenAmt = 0;
+
+  ACCOUNTS.forEach(a => {
+    if (a.payStatus === 'paid') return;
+    const d = a._days !== undefined ? a._days : Math.floor((now - new Date(a.dueDate)) / 86400000);
+    if (d <= 0) return; // current / not yet due
+    totalOpen++; totalOpenAmt += a.balance;
+    for (let i = 0; i < buckets.length; i++) {
+      if (d >= buckets[i].min && d <= buckets[i].max) {
+        agingData[i].count++; agingData[i].amount += a.balance;
+        break;
+      }
+    }
+  });
+
+  // ── 2. Yesterday's activity audit trail ──
+  const yesterdayNotes = [];
+  const collectorActivity = {};
+  Object.entries(NOTES).forEach(([invoiceId, noteList]) => {
+    noteList.forEach(n => {
+      if (n.date !== yesterday) return;
+      const acct = ACCOUNTS.find(a => a.id === invoiceId);
+      const bName = acct ? (brandMap[acct.brand] || acct.brand || '—') : '—';
+      yesterdayNotes.push({
+        invoiceId,
+        customer:  acct ? acct.customer : '—',
+        brand:     bName,
+        balance:   acct ? acct.balance : 0,
+        collector: n.by || '—',
+        method:    n.method || '—',
+        notes:     (n.notes || '').substring(0, 80),
+        committed: n.committedAmount || 0,
+        committedDate: n.committedDate || '',
+        writeOff:  n.needsWriteOff || false,
+        litigation: n.litigation || false,
+        action:    n.action || ''
+      });
+      // Collector summary
+      if (!collectorActivity[n.by]) collectorActivity[n.by] = { notes: 0, balanceTouched: 0, committed: 0 };
+      collectorActivity[n.by].notes++;
+      collectorActivity[n.by].balanceTouched += (acct ? acct.balance : 0);
+      collectorActivity[n.by].committed += (n.committedAmount || 0);
+    });
+  });
+  yesterdayNotes.sort((a, b) => a.collector.localeCompare(b.collector) || b.balance - a.balance);
+
+  // ── 3. Status changes (compare against prior snapshot) ──
+  let statusChanges = [];
+  try {
+    const snapRaw = localStorage.getItem('aro_briefing_prior_snapshot');
+    if (snapRaw) {
+      const prior = JSON.parse(snapRaw);
+      ACCOUNTS.forEach(a => {
+        const prev = prior[a.id];
+        if (!prev) return;
+        if (prev.payStatus !== a.payStatus) {
+          statusChanges.push({
+            invoiceId: a.id,
+            customer: a.customer,
+            brand: brandMap[a.brand] || a.brand || '—',
+            balance: a.balance,
+            from: prev.payStatus,
+            to: a.payStatus
+          });
+        }
+      });
+    }
+  } catch(e) {}
+
+  // New write-off and litigation flags from yesterday
+  const newWriteoffs = yesterdayNotes.filter(n => n.writeOff);
+  const newLitigation = yesterdayNotes.filter(n => n.litigation);
+
+  // ── 4. Top 10 open balances ──
+  const topOpen = ACCOUNTS
+    .filter(a => a.payStatus !== 'paid')
+    .sort((a, b) => b.balance - a.balance)
+    .slice(0, 10)
+    .map(a => {
+      const notes = NOTES[a.id] || [];
+      const lastNote = notes.length ? notes[notes.length - 1] : null;
+      return {
+        invoiceId: a.id,
+        customer: a.customer,
+        brand: brandMap[a.brand] || a.brand || '—',
+        balance: a.balance,
+        daysAged: a._days !== undefined ? a._days : Math.floor((now - new Date(a.dueDate)) / 86400000),
+        lastNoteDate: lastNote ? lastNote.date : '—',
+        lastCollector: lastNote ? lastNote.by : '—'
+      };
+    });
+
+  // Save current snapshot for tomorrow
+  try {
+    const snap = {};
+    ACCOUNTS.forEach(a => { snap[a.id] = { balance: a.balance, payStatus: a.payStatus }; });
+    localStorage.setItem('aro_briefing_prior_snapshot', JSON.stringify(snap));
+  } catch(e) {}
+
+  // ── BUILD HTML ──
+  const fmtD = n => _fmtUSD.format(n);
+  const collectorRows = Object.entries(collectorActivity)
+    .sort((a, b) => b[1].notes - a[1].notes)
+    .map(([name, d]) => `<tr><td style="padding:6px 10px;font-weight:600">${name}</td><td style="padding:6px 10px;text-align:center">${d.notes}</td><td style="padding:6px 10px;text-align:right">${fmtD(d.balanceTouched)}</td><td style="padding:6px 10px;text-align:right;color:#0a8a5f;font-weight:600">${d.committed > 0 ? fmtD(d.committed) : '—'}</td></tr>`)
+    .join('');
+
+  const activityRows = yesterdayNotes.map(n => {
+    const flags = (n.writeOff ? ' ⚠W/O' : '') + (n.litigation ? ' ⚖LIT' : '');
+    return `<tr style="border-bottom:1px solid #e8ecf3">
+      <td style="padding:5px 8px;font-family:monospace;font-size:12px">${n.invoiceId}</td>
+      <td style="padding:5px 8px;font-size:12px">${n.customer}</td>
+      <td style="padding:5px 8px;text-align:right;font-weight:600;font-size:12px">${fmtD(n.balance)}</td>
+      <td style="padding:5px 8px;font-size:12px">${n.collector}</td>
+      <td style="padding:5px 8px;font-size:12px">${n.method}</td>
+      <td style="padding:5px 8px;font-size:12px;color:#4a5a7a;max-width:200px">${n.notes}${flags}</td>
+      <td style="padding:5px 8px;text-align:right;font-size:12px;color:#0a8a5f">${n.committed > 0 ? fmtD(n.committed) : ''}</td>
+    </tr>`;
+  }).join('');
+
+  const statusRows = statusChanges.map(s => {
+    const color = s.to === 'paid' ? '#0a8a5f' : s.to === 'partial' ? '#9a6200' : '#c50000';
+    return `<tr><td style="padding:5px 8px;font-family:monospace;font-size:12px">${s.invoiceId}</td><td style="padding:5px 8px;font-size:12px">${s.customer}</td><td style="padding:5px 8px;font-size:12px">${s.brand}</td><td style="padding:5px 8px;text-align:right;font-weight:600">${fmtD(s.balance)}</td><td style="padding:5px 8px;font-size:12px">${s.from}</td><td style="padding:5px 8px;font-weight:700;color:${color}">${s.to}</td></tr>`;
+  }).join('');
+
+  const topRows = topOpen.map((t, i) => `<tr style="border-bottom:1px solid #e8ecf3">
+    <td style="padding:5px 8px;font-weight:700;color:#00479f">#${i + 1}</td>
+    <td style="padding:5px 8px;font-size:12px">${t.customer}</td>
+    <td style="padding:5px 8px;font-family:monospace;font-size:12px">${t.invoiceId}</td>
+    <td style="padding:5px 8px;font-size:12px;color:#4a5a7a">${t.brand}</td>
+    <td style="padding:5px 8px;text-align:right;font-weight:700;color:#c50000">${fmtD(t.balance)}</td>
+    <td style="padding:5px 8px;text-align:center;font-size:12px">${t.daysAged}d</td>
+    <td style="padding:5px 8px;font-size:12px">${t.lastCollector}</td>
+    <td style="padding:5px 8px;font-size:12px;color:#4a5a7a">${t.lastNoteDate}</td>
+  </tr>`).join('');
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="font-family:Segoe UI,Arial,sans-serif;background:#f0f5fc;margin:0;padding:20px">
+<div style="max-width:800px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 16px rgba(10,15,51,0.1)">
+
+  <!-- Header -->
+  <div style="background:#0a0f33;color:#fff;padding:20px 24px">
+    <div style="font-size:20px;font-weight:800;letter-spacing:2px">ARO STRIKE FORCE</div>
+    <div style="font-size:12px;color:#d4890a;letter-spacing:3px;margin-top:2px">DAILY COLLECTIONS BRIEFING</div>
+    <div style="font-size:13px;color:#8899bb;margin-top:8px">${today} &nbsp;|&nbsp; Activity from ${yesterday}</div>
+  </div>
+
+  <!-- Aging Snapshot -->
+  <div style="padding:20px 24px;border-bottom:1px solid #e8ecf3">
+    <div style="font-size:14px;font-weight:700;color:#0a0f33;margin-bottom:12px">AR AGING SNAPSHOT</div>
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <div style="flex:1;background:rgba(0,71,159,0.06);border:1px solid rgba(0,71,159,0.15);border-radius:8px;padding:10px;text-align:center">
+        <div style="font-size:11px;color:#4a5a7a;text-transform:uppercase;letter-spacing:1px">Total Open</div>
+        <div style="font-size:18px;font-weight:800;color:#00479f">${fmtD(totalOpenAmt)}</div>
+        <div style="font-size:12px;color:#4a5a7a">${totalOpen} invoices</div>
+      </div>
+      <div style="flex:1;background:rgba(10,138,95,0.06);border:1px solid rgba(10,138,95,0.15);border-radius:8px;padding:10px;text-align:center">
+        <div style="font-size:11px;color:#4a5a7a;text-transform:uppercase;letter-spacing:1px">Notes Yesterday</div>
+        <div style="font-size:18px;font-weight:800;color:#0a8a5f">${yesterdayNotes.length}</div>
+        <div style="font-size:12px;color:#4a5a7a">${Object.keys(collectorActivity).length} collectors</div>
+      </div>
+    </div>
+    <table style="width:100%;border-collapse:collapse;border:1px solid #e8ecf3;border-radius:8px;overflow:hidden">
+      <tr style="background:#f0f5fc">${buckets.map((b, i) => `<th style="padding:6px 8px;font-size:11px;color:${bktColors[i]};font-weight:700;text-align:center">${b.label}</th>`).join('')}</tr>
+      <tr>${agingData.map((d, i) => `<td style="padding:8px;text-align:center;border-left:3px solid ${bktColors[i]}20"><div style="font-weight:700;color:${bktColors[i]};font-size:13px">${fmtD(d.amount)}</div><div style="font-size:11px;color:#4a5a7a">${d.count} inv</div></td>`).join('')}</tr>
+    </table>
+  </div>
+
+  <!-- Collector Activity Summary -->
+  <div style="padding:20px 24px;border-bottom:1px solid #e8ecf3">
+    <div style="font-size:14px;font-weight:700;color:#0a0f33;margin-bottom:10px">COLLECTOR ACTIVITY — ${yesterday}</div>
+    ${collectorRows ? `<table style="width:100%;border-collapse:collapse"><tr style="background:#f0f5fc"><th style="text-align:left;padding:6px 10px;font-size:11px;color:#4a5a7a">Collector</th><th style="text-align:center;padding:6px 10px;font-size:11px;color:#4a5a7a">Notes</th><th style="text-align:right;padding:6px 10px;font-size:11px;color:#4a5a7a">Balance Touched</th><th style="text-align:right;padding:6px 10px;font-size:11px;color:#4a5a7a">Committed</th></tr>${collectorRows}</table>` : '<div style="color:#4a5a7a;font-size:13px">No collector activity recorded yesterday.</div>'}
+  </div>
+
+  <!-- Audit Trail -->
+  <div style="padding:20px 24px;border-bottom:1px solid #e8ecf3">
+    <div style="font-size:14px;font-weight:700;color:#0a0f33;margin-bottom:10px">ACTIVITY AUDIT TRAIL — ${yesterday}</div>
+    ${activityRows ? `<table style="width:100%;border-collapse:collapse;font-size:12px"><tr style="background:#f0f5fc"><th style="text-align:left;padding:5px 8px;font-size:11px;color:#4a5a7a">Invoice</th><th style="text-align:left;padding:5px 8px;font-size:11px;color:#4a5a7a">Customer</th><th style="text-align:right;padding:5px 8px;font-size:11px;color:#4a5a7a">Balance</th><th style="text-align:left;padding:5px 8px;font-size:11px;color:#4a5a7a">Collector</th><th style="text-align:left;padding:5px 8px;font-size:11px;color:#4a5a7a">Method</th><th style="text-align:left;padding:5px 8px;font-size:11px;color:#4a5a7a">Notes</th><th style="text-align:right;padding:5px 8px;font-size:11px;color:#4a5a7a">Committed</th></tr>${activityRows}</table>` : '<div style="color:#4a5a7a;font-size:13px">No notes logged yesterday.</div>'}
+  </div>
+
+  <!-- Status Changes -->
+  ${statusChanges.length || newWriteoffs.length || newLitigation.length ? `<div style="padding:20px 24px;border-bottom:1px solid #e8ecf3">
+    <div style="font-size:14px;font-weight:700;color:#0a0f33;margin-bottom:10px">STATUS CHANGES</div>
+    ${statusRows ? `<table style="width:100%;border-collapse:collapse"><tr style="background:#f0f5fc"><th style="text-align:left;padding:5px 8px;font-size:11px;color:#4a5a7a">Invoice</th><th style="text-align:left;padding:5px 8px;font-size:11px;color:#4a5a7a">Customer</th><th style="text-align:left;padding:5px 8px;font-size:11px;color:#4a5a7a">Brand</th><th style="text-align:right;padding:5px 8px;font-size:11px;color:#4a5a7a">Balance</th><th style="text-align:left;padding:5px 8px;font-size:11px;color:#4a5a7a">From</th><th style="text-align:left;padding:5px 8px;font-size:11px;color:#4a5a7a">To</th></tr>${statusRows}</table>` : ''}
+    ${newWriteoffs.length ? `<div style="margin-top:8px;font-size:12px;color:#c50000">⚠ ${newWriteoffs.length} new write-off flag(s) added</div>` : ''}
+    ${newLitigation.length ? `<div style="margin-top:4px;font-size:12px;color:#500028">⚖ ${newLitigation.length} new litigation flag(s) added</div>` : ''}
+  </div>` : ''}
+
+  <!-- Top 10 Open Balances -->
+  <div style="padding:20px 24px">
+    <div style="font-size:14px;font-weight:700;color:#0a0f33;margin-bottom:10px">TOP 10 OPEN BALANCES</div>
+    <table style="width:100%;border-collapse:collapse"><tr style="background:#f0f5fc"><th style="padding:5px 8px;font-size:11px;color:#4a5a7a">#</th><th style="text-align:left;padding:5px 8px;font-size:11px;color:#4a5a7a">Customer</th><th style="text-align:left;padding:5px 8px;font-size:11px;color:#4a5a7a">Invoice</th><th style="text-align:left;padding:5px 8px;font-size:11px;color:#4a5a7a">Brand</th><th style="text-align:right;padding:5px 8px;font-size:11px;color:#4a5a7a">Balance</th><th style="text-align:center;padding:5px 8px;font-size:11px;color:#4a5a7a">Age</th><th style="text-align:left;padding:5px 8px;font-size:11px;color:#4a5a7a">Last Collector</th><th style="text-align:left;padding:5px 8px;font-size:11px;color:#4a5a7a">Last Note</th></tr>${topRows}</table>
+  </div>
+
+  <!-- Footer -->
+  <div style="background:#f0f5fc;padding:14px 24px;font-size:11px;color:#4a5a7a;text-align:center;border-top:1px solid #e8ecf3">
+    ARO Strike Force Collections Portal &nbsp;·&nbsp; Auto-generated on ${today} &nbsp;·&nbsp; <a href="https://mkhaleel-aro.github.io/aro-strikeforce-portal/" style="color:#00479f">Open Portal</a>
+  </div>
+
+</div></body></html>`;
+}
+
+function _getPriorBusinessDay(todayStr) {
+  const d = new Date(todayStr + 'T12:00:00');
+  const dow = d.getDay(); // 0=Sun, 1=Mon, ...
+  // Mon→Fri, Tue-Fri→prev day, Sun→Fri, Sat→Fri
+  const sub = dow === 1 ? 3 : dow === 0 ? 2 : 1;
+  d.setDate(d.getDate() - sub);
+  return d.toISOString().slice(0, 10);
+}
+
+async function sendBriefingEmail(today, htmlBody) {
+  // Get a token with Mail.Send scope
+  const app = await initMSAL();
+  const scopes = ['https://graph.microsoft.com/Mail.Send'];
+  let token;
+  try {
+    const result = await app.acquireTokenSilent({ scopes, account: _msalAccount });
+    token = result.accessToken;
+  } catch(e) {
+    // If silent fails, try popup (user interaction required first time)
+    if (e instanceof msal.InteractionRequiredAuthError) {
+      const result = await app.acquireTokenPopup({ scopes });
+      _msalAccount = result.account;
+      token = result.accessToken;
+    } else {
+      throw e;
+    }
+  }
+
+  const emailPayload = {
+    message: {
+      subject: 'ARO Strike Force — Daily Collections Briefing (' + today + ')',
+      body: { contentType: 'HTML', content: htmlBody },
+      toRecipients: [{ emailAddress: { address: BRIEFING_RECIPIENT } }]
+    },
+    saveToSentItems: true
+  };
+
+  const r = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
+    method: 'POST',
+    headers: {
+      Authorization: 'Bearer ' + token,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(emailPayload)
+  });
+
+  if (!r.ok) {
+    const body = await r.text().catch(() => '');
+    throw new Error('sendMail failed (' + r.status + '): ' + body.substring(0, 200));
+  }
+}
+
+async function manualSendBriefing() {
+  const statusEl = document.getElementById('briefing-status');
+  if (statusEl) statusEl.textContent = 'Generating briefing…';
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const briefingHtml = generateDailyBriefing(today);
+    if (statusEl) statusEl.textContent = 'Sending email…';
+    await sendBriefingEmail(today, briefingHtml);
+    // Save flag to blob
+    await blobUpload('briefing_' + today + '.json', JSON.stringify({ sentAt: new Date().toISOString(), sentBy: currentUser.name, manual: true }));
+    if (statusEl) statusEl.innerHTML = '<span style="color:var(--green);font-weight:600">✅ Briefing sent to ' + BRIEFING_RECIPIENT + '</span>';
+    showToast('📧 Daily briefing sent!');
+  } catch(e) {
+    console.error('Manual briefing failed:', e);
+    if (statusEl) statusEl.innerHTML = '<span style="color:var(--red)">❌ Failed: ' + (e.message || e).toString().substring(0, 100) + '</span>';
+    showToast('❌ Briefing failed: ' + e.message, false);
+  }
 }
 
 // ── Daily cache helpers — AR + DASH only fetched from blob once per day ──
@@ -2322,6 +2662,9 @@ function parseARText(csvText) {
       } else {
         showToast(`✅ Data loaded: ${openCt} open · ${partialCt} partial · ${paidCt} collected`);
       }
+
+      // ── Auto-send daily briefing on first admin login after data loads ──
+      setTimeout(() => checkAndSendBriefing(), 2000);
     },
     error: (err) => {
       showToast('Error parsing AR data: ' + err.message, false);
