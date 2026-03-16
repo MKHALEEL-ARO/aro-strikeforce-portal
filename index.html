@@ -1744,61 +1744,52 @@ async function loadFromAzureBlob() {
         .filter(n => n.toLowerCase().startsWith('ar transaction summary') && n.toLowerCase().endsWith('.csv'))
         .sort();
       if (arFiles.length === 0) throw new Error('No AR transaction summary files found in Azure');
+      // Fetch all AR files in parallel for speed
+      if (sub) sub.textContent = 'Loading AR data…';
+      const arFetches = arFiles.map(f => blobFetch(f));
+      const arTexts = await Promise.all(arFetches);
+
+      // Parse each file once (not per-line), dedup by Record number
       let arHeader = '';
-      let arDataMap = new Map(); // keyed by Record number to deduplicate across years
-      let recNumCol = -1; // column index for Record number
-      for (const arFile of arFiles) {
-        if (sub) sub.textContent = 'Loading ' + arFile + '…';
-        const csvText = await blobFetch(arFile);
-        const lines = csvText.trim().split('\n');
-        if (lines.length === 0) continue;
+      let recNumCol = -1;
+      const arDataMap = new Map();
+      for (let fi = 0; fi < arFiles.length; fi++) {
+        const csvText = arTexts[fi];
+        const parsed = Papa.parse(csvText.trim(), { skipEmptyLines: true });
+        if (!parsed.data || parsed.data.length === 0) continue;
         if (!arHeader) {
-          arHeader = lines[0];
-          // Use PapaParse to reliably find the Record number column
-          const parsed = Papa.parse(arHeader);
-          if (parsed.data && parsed.data[0]) {
-            recNumCol = parsed.data[0].findIndex(c => c.trim().toLowerCase() === 'record number');
-          }
+          arHeader = parsed.data[0].join(',');
+          recNumCol = parsed.data[0].findIndex(c => c.trim().toLowerCase() === 'record number');
         }
-        for (let i = 1; i < lines.length; i++) {
-          const line = lines[i].trim();
-          if (!line) continue;
-          // Extract Record number using PapaParse for CSV-safe parsing
-          let key = i + '_' + arFile; // fallback unique key
-          if (recNumCol >= 0) {
-            const parsed = Papa.parse(line);
-            if (parsed.data && parsed.data[0]) {
-              const recNum = (parsed.data[0][recNumCol] || '').trim();
-              if (recNum) key = recNum;
-            }
-          }
-          arDataMap.set(key, line);
+        for (let i = 1; i < parsed.data.length; i++) {
+          const row = parsed.data[i];
+          if (!row || row.length < 2) continue;
+          const recNum = recNumCol >= 0 ? (row[recNumCol] || '').trim() : '';
+          const key = recNum || (i + '_' + arFiles[fi]);
+          // Later year files overwrite earlier — keeps freshest data
+          arDataMap.set(key, row.map(c => c.includes(',') || c.includes('"') ? '"' + c.replace(/"/g,'""') + '"' : c).join(','));
         }
       }
-      const arDataRows = [arHeader, ...arDataMap.values()];
-      combinedAR = arDataRows.join('\n');
+      combinedAR = [arHeader, ...arDataMap.values()].join('\n');
 
-      // ── 2a. DASH / Job insurance and adjustor files ──
+      // ── 2a. DASH / Job insurance and adjustor files (parallel fetch) ──
       if (sub) sub.textContent = 'Loading DASH enrichment data…';
       dashEntries = [];
       const dashFiles = allBlobs
         .filter(n => n.toLowerCase().startsWith('job insurance and adjust') && n.toLowerCase().endsWith('.csv'));
-      for (const blobName of dashFiles) {
-        try {
-          if (sub) sub.textContent = 'Loading ' + blobName + '…';
-          const csvText = await blobFetch(blobName);
-          dashEntries.push({ name: blobName, csv: csvText });
-        } catch(e) { console.warn('DASH blob skip:', blobName, e); }
-      }
-      // Also check DASH/ subfolder
       const dashSubFiles = allBlobs
         .filter(n => n.toLowerCase().startsWith('dash/') && n.toLowerCase().endsWith('.csv'));
-      for (const blobName of dashSubFiles) {
-        try {
-          const csvText = await blobFetch(blobName);
-          dashEntries.push({ name: blobName.split('/').pop(), csv: csvText });
-        } catch(e) { console.warn('DASH subfolder blob skip:', blobName, e); }
-      }
+      const allDashFiles = [...dashFiles, ...dashSubFiles];
+      const dashResults = await Promise.allSettled(allDashFiles.map(f => blobFetch(f)));
+      dashResults.forEach((result, idx) => {
+        if (result.status === 'fulfilled') {
+          const blobName = allDashFiles[idx];
+          const displayName = blobName.includes('/') ? blobName.split('/').pop() : blobName;
+          dashEntries.push({ name: displayName, csv: result.value });
+        } else {
+          console.warn('DASH blob skip:', allDashFiles[idx], result.reason);
+        }
+      });
 
       // ── Save to daily cache ──
       _saveCache(combinedAR, dashEntries);
