@@ -1061,10 +1061,38 @@ let currentBrandFilter = '';  // '' = all brands
 let currentSearchTerm = '';
 // ══ (grouping removed — flat list render) ══
 
+// ══ PRE-LOGIN: fetch portal_users.json from Azure Blob so all users can log in ══
+let _blobUsersReady = false;
+const _blobUsersPromise = (async function _preloadBlobUsers() {
+  if (!BLOB_SAS_URL) { _blobUsersReady = true; return; }
+  try {
+    const encoded = encodeURIComponent('portal_users.json');
+    const url_obj = new URL(BLOB_SAS_URL);
+    const base = url_obj.origin + url_obj.pathname;
+    const sas  = url_obj.search;
+    const r = await fetch(base + '/' + encoded + sas);
+    if (!r.ok) { _blobUsersReady = true; return; } // file doesn't exist yet — first run
+    const data = JSON.parse(await r.text());
+    if (data.users && data.users.length) {
+      // Merge blob users with seed (blob takes priority, seed fills gaps)
+      const blobMap = {};
+      data.users.forEach(u => { blobMap[u.username.toLowerCase()] = u; });
+      USERS_SEED.forEach(s => {
+        if (!blobMap[s.username.toLowerCase()]) data.users.push(s);
+      });
+      USERS = data.users;
+      try { localStorage.setItem('aro_users_v2', JSON.stringify(USERS)); } catch(e) {}
+    }
+  } catch(e) { console.warn('Pre-login user fetch skipped:', e); }
+  _blobUsersReady = true;
+})();
+
 // ══ LOGIN ══
-function doLogin(){
+async function doLogin(){
   const u = document.getElementById('u-username').value.trim().toLowerCase();
   const p = document.getElementById('u-password').value;
+  // Wait for blob users to load if still in-flight
+  if (!_blobUsersReady) await _blobUsersPromise;
   // Re-load users fresh in case localStorage failed at startup
   if (!USERS || USERS.length === 0) USERS = DataLayer.getUsers();
   const userList = (USERS && USERS.length) ? USERS : USERS_SEED;
