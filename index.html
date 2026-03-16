@@ -787,17 +787,6 @@ body{font-family:'Titillium Web',Arial,sans-serif;background:var(--ice);color:va
 
     <div class="divider" style="margin:28px 0"></div>
     <div class="sec-hdr" style="margin-bottom:16px">
-      <div class="sec-title">📧 Daily Briefing Email</div>
-    </div>
-    <p style="font-size:13px;color:var(--muted);margin-bottom:12px;max-width:640px">
-      A daily AR collections briefing is automatically emailed to <strong>mkhaleel@amrestoration.com</strong> on first admin login each day.
-      The briefing includes aging snapshot, prior-day audit trail, collector activity, status changes, and top open balances.
-    </p>
-    <button class="btn-save-bonus" style="background:var(--green);width:auto;padding:10px 24px" onclick="manualSendBriefing()">📧 Send Today's Briefing Now</button>
-    <span id="briefing-status" style="margin-left:12px;font-size:12px;color:var(--muted)"></span>
-
-    <div class="divider" style="margin:28px 0"></div>
-    <div class="sec-hdr" style="margin-bottom:16px">
       <div class="sec-title">Campaign Settings</div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;max-width:720px">
@@ -895,6 +884,23 @@ body{font-family:'Titillium Web',Arial,sans-serif;background:var(--ice);color:va
       <tbody id="wo-tbody"></tbody>
     </table>
     <p id="wo-empty" style="display:none;text-align:center;padding:40px;color:var(--muted);font-size:13px">No invoices have been flagged for write-off yet. Use the <strong>Flag for Write-Off Review</strong> checkbox when logging a contact note.</p>
+  </div>
+
+  <!-- ══ DAILY BRIEFING PAGE ══ -->
+  <div class="page" id="page-briefing">
+    <div class="sec-hdr" style="margin-bottom:16px">
+      <div class="sec-title">📧 Daily Collections Briefing</div>
+      <div style="display:flex;gap:10px;align-items:center">
+        <select id="briefing-date-picker" onchange="loadBriefingForDate(this.value)" style="padding:6px 12px;border-radius:8px;border:1px solid var(--border);font-size:13px;font-family:'Titillium Web',sans-serif;background:#fff;color:var(--navy)"></select>
+        <button class="btn-sm" onclick="generateAndShowBriefing()" style="background:var(--green);color:#fff;border-color:var(--green);font-weight:700">🔄 Generate Today's Briefing</button>
+      </div>
+    </div>
+    <div id="briefing-content" style="background:var(--white);border-radius:12px;border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
+      <div style="text-align:center;padding:60px 20px;color:var(--muted)">
+        <div style="font-size:40px;margin-bottom:12px">📧</div>
+        <p style="font-size:14px">Loading briefing…</p>
+      </div>
+    </div>
   </div>
 
 
@@ -1168,17 +1174,19 @@ function renderUI(){
   document.getElementById('tb-role-badge').className = 'tb-role role-' + currentUser.role;
   document.getElementById('tb-role-badge').textContent = currentUser.role;
 
+  const isBriefingUser = BRIEFING_USERS.includes(currentUser.name);
   const tabs = [
     {id:'page-accounts',   label:'📋 Accounts',      adminOnly:false},
     {id:'page-summary',    label:'📈 Brand Summary',  adminOnly:false},
     {id:'page-leaderboard',label:'🏆 Leaderboard',    adminOnly:true},
+    {id:'page-briefing',   label:'📧 Briefing',       adminOnly:true, briefingOnly:true},
     {id:'page-writeoff',   label:'⚠ Write-Offs',      adminOnly:true},
     {id:'page-bonus',      label:'💰 Bonus Config',    adminOnly:true},
     {id:'page-users',      label:'👥 Users',           adminOnly:true}
   ];
 
   document.getElementById('nav-tabs').innerHTML = tabs
-    .filter(t => !t.adminOnly || isA)
+    .filter(t => (!t.adminOnly || isA) && (!t.briefingOnly || isBriefingUser))
     .map(t => `<div class="nav-tab ${t.id === 'page-accounts' ? 'active' : ''} ${t.adminOnly ? 'admin-only' : ''}" onclick="switchPage('${t.id}')">${t.label}</div>`)
     .join('');
 
@@ -1199,6 +1207,7 @@ function switchPage(pageId, clickedTab){
   if(pageId === 'page-summary')     requestAnimationFrame(() => renderBrandSummary());
   if(pageId === 'page-leaderboard') requestAnimationFrame(() => renderLeaderboard());
   if(pageId === 'page-writeoff')    requestAnimationFrame(() => renderWriteOff());
+  if(pageId === 'page-briefing')    requestAnimationFrame(() => renderBriefingPage());
 }
 
 // ══ BRAND FILTER ══
@@ -1425,8 +1434,7 @@ async function initMSAL() {
 async function getSPToken() {
   const app = await initMSAL();
   const scopes = ['https://graph.microsoft.com/Sites.Selected',
-                  'https://graph.microsoft.com/Files.ReadWrite',
-                  'https://graph.microsoft.com/Mail.Send'];
+                  'https://graph.microsoft.com/Files.ReadWrite'];
   const req = { scopes, account: _msalAccount };
   try {
     const result = await app.acquireTokenSilent(req);
@@ -1445,8 +1453,7 @@ async function getSPToken() {
 async function loginWithMicrosoft() {
   const app = await initMSAL();
   const scopes = ['https://graph.microsoft.com/Sites.Selected',
-                  'https://graph.microsoft.com/Files.ReadWrite',
-                  'https://graph.microsoft.com/Mail.Send'];
+                  'https://graph.microsoft.com/Files.ReadWrite'];
   try {
     const result = await app.loginPopup({ scopes });
     _msalAccount = result.account;
@@ -1720,41 +1727,125 @@ async function blobSyncNotes() {
 // ══ DAILY BRIEFING ENGINE ══
 // Auto-sends a morning AR collections briefing email on first admin login each day
 
-const BRIEFING_RECIPIENT = 'mkhaleel@amrestoration.com';
+// Allowed briefing users (name must match exactly)
+const BRIEFING_USERS = ['Mohammed Khaleel', 'Rebecca Mumma', 'Danielle McMahon'];
 
-async function checkAndSendBriefing() {
-  // Only admins trigger the briefing
+async function checkAndShowBriefing() {
   if (!currentUser || currentUser.role !== 'admin') return;
+  if (!BRIEFING_USERS.includes(currentUser.name)) return;
   if (!BLOB_SAS_URL) return;
   if (!ACCOUNTS.length) return;
-  // Requires MSAL library and an active Microsoft sign-in
-  if (typeof msal === 'undefined' || !_msalAccount) return;
 
   const today = new Date().toISOString().slice(0, 10);
   const flagFile = 'briefing_' + today + '.json';
 
-  // Check if briefing was already sent today
+  // Check if briefing already generated today
   try {
     await blobFetch(flagFile);
-    console.log('Briefing already sent today (' + today + ')');
-    return; // flag exists — already sent
-  } catch(e) {
-    // 404 = not sent yet, proceed
-  }
+    return; // already generated
+  } catch(e) { /* 404 = not generated yet */ }
 
   try {
     const briefingHtml = generateDailyBriefing(today);
-    await sendBriefingEmail(today, briefingHtml);
-    // Save flag to blob so it doesn't re-send
-    await blobUpload(flagFile, JSON.stringify({ sentAt: new Date().toISOString(), sentBy: currentUser.name }));
-    // Save today's snapshot for tomorrow's comparison
+    // Save briefing to blob for persistence + history
+    await blobUpload(flagFile, JSON.stringify({
+      generatedAt: new Date().toISOString(),
+      generatedBy: currentUser.name,
+      date: today,
+      html: briefingHtml
+    }));
+    // Save snapshot for tomorrow's comparison
     const snapshot = {};
     ACCOUNTS.forEach(a => { snapshot[a.id] = { balance: a.balance, payStatus: a.payStatus }; });
     await blobUpload('briefing_snapshot.json', JSON.stringify({ date: today, accounts: snapshot }));
-    showToast('📧 Daily briefing sent to ' + BRIEFING_RECIPIENT);
+    showToast('📧 Today\'s briefing is ready — check the Briefing tab');
   } catch(e) {
-    console.warn('Daily briefing failed:', e);
-    // Don't block the app — briefing is best-effort
+    console.warn('Daily briefing generation failed:', e);
+  }
+}
+
+// Render the briefing page (called when user clicks Briefing tab)
+async function renderBriefingPage() {
+  const container = document.getElementById('briefing-content');
+  const picker = document.getElementById('briefing-date-picker');
+  if (!ACCOUNTS.length) {
+    container.innerHTML = '<div style="text-align:center;padding:60px;color:var(--muted)">Load AR data first to view briefings.</div>';
+    return;
+  }
+
+  // Populate date picker with available briefing dates from blob
+  try {
+    const allBlobs = await blobListPrefix('briefing_');
+    const dates = allBlobs
+      .filter(n => n.match(/^briefing_\d{4}-\d{2}-\d{2}\.json$/))
+      .map(n => n.replace('briefing_', '').replace('.json', ''))
+      .sort((a, b) => b.localeCompare(a)); // newest first
+
+    const today = new Date().toISOString().slice(0, 10);
+    if (!dates.includes(today)) dates.unshift(today);
+
+    picker.innerHTML = dates.map(d => `<option value="${d}"${d === today ? ' selected' : ''}>${d}${d === today ? ' (Today)' : ''}</option>`).join('');
+    loadBriefingForDate(today);
+  } catch(e) {
+    // If blob list fails, just show today
+    const today = new Date().toISOString().slice(0, 10);
+    picker.innerHTML = `<option value="${today}">${today} (Today)</option>`;
+    loadBriefingForDate(today);
+  }
+}
+
+async function loadBriefingForDate(dateStr) {
+  const container = document.getElementById('briefing-content');
+  container.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted)">Loading…</div>';
+
+  const flagFile = 'briefing_' + dateStr + '.json';
+  try {
+    const raw = await blobFetch(flagFile);
+    const data = JSON.parse(raw);
+    if (data.html) {
+      container.innerHTML = data.html;
+      return;
+    }
+  } catch(e) { /* not found in blob */ }
+
+  // Not in blob — if it's today, generate live
+  const today = new Date().toISOString().slice(0, 10);
+  if (dateStr === today && ACCOUNTS.length) {
+    const html = generateDailyBriefing(today);
+    container.innerHTML = html;
+  } else {
+    container.innerHTML = '<div style="text-align:center;padding:60px;color:var(--muted)"><div style="font-size:36px;margin-bottom:12px">📭</div><p>No briefing found for ' + dateStr + '.</p><p style="font-size:12px;margin-top:8px">Briefings are generated when an admin logs in each day.</p></div>';
+  }
+}
+
+async function generateAndShowBriefing() {
+  const container = document.getElementById('briefing-content');
+  container.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted)">Generating briefing…</div>';
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const html = generateDailyBriefing(today);
+    container.innerHTML = html;
+    // Save to blob
+    if (BLOB_SAS_URL) {
+      await blobUpload('briefing_' + today + '.json', JSON.stringify({
+        generatedAt: new Date().toISOString(),
+        generatedBy: currentUser ? currentUser.name : 'Manual',
+        date: today,
+        html: html
+      }));
+      // Save snapshot
+      const snapshot = {};
+      ACCOUNTS.forEach(a => { snapshot[a.id] = { balance: a.balance, payStatus: a.payStatus }; });
+      await blobUpload('briefing_snapshot.json', JSON.stringify({ date: today, accounts: snapshot }));
+    }
+    showToast('📧 Briefing generated and saved');
+    // Refresh date picker
+    const picker = document.getElementById('briefing-date-picker');
+    if (picker && !Array.from(picker.options).some(o => o.value === today)) {
+      picker.insertAdjacentHTML('afterbegin', `<option value="${today}" selected>${today} (Today)</option>`);
+    }
+  } catch(e) {
+    container.innerHTML = '<div style="text-align:center;padding:40px;color:var(--red)">Error: ' + (e.message || e) + '</div>';
   }
 }
 
@@ -1982,71 +2073,6 @@ function _getPriorBusinessDay(todayStr) {
   const sub = dow === 1 ? 3 : dow === 0 ? 2 : 1;
   d.setDate(d.getDate() - sub);
   return d.toISOString().slice(0, 10);
-}
-
-async function sendBriefingEmail(today, htmlBody) {
-  // Ensure MSAL library is loaded
-  if (typeof msal === 'undefined') throw new Error('Microsoft auth library not loaded. Please reload the page and try again.');
-  // Get a token with Mail.Send scope
-  const app = await initMSAL();
-  if (!_msalAccount) throw new Error('Not signed into Microsoft. Please connect via SharePoint first, then try again.');
-  const scopes = ['https://graph.microsoft.com/Mail.Send'];
-  let token;
-  try {
-    const result = await app.acquireTokenSilent({ scopes, account: _msalAccount });
-    token = result.accessToken;
-  } catch(e) {
-    // If silent fails, try popup (user interaction required first time)
-    if (typeof msal !== 'undefined' && e instanceof msal.InteractionRequiredAuthError) {
-      const result = await app.acquireTokenPopup({ scopes });
-      _msalAccount = result.account;
-      token = result.accessToken;
-    } else {
-      throw e;
-    }
-  }
-
-  const emailPayload = {
-    message: {
-      subject: 'ARO Strike Force — Daily Collections Briefing (' + today + ')',
-      body: { contentType: 'HTML', content: htmlBody },
-      toRecipients: [{ emailAddress: { address: BRIEFING_RECIPIENT } }]
-    },
-    saveToSentItems: true
-  };
-
-  const r = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
-    method: 'POST',
-    headers: {
-      Authorization: 'Bearer ' + token,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(emailPayload)
-  });
-
-  if (!r.ok) {
-    const body = await r.text().catch(() => '');
-    throw new Error('sendMail failed (' + r.status + '): ' + body.substring(0, 200));
-  }
-}
-
-async function manualSendBriefing() {
-  const statusEl = document.getElementById('briefing-status');
-  if (statusEl) statusEl.textContent = 'Generating briefing…';
-  try {
-    const today = new Date().toISOString().slice(0, 10);
-    const briefingHtml = generateDailyBriefing(today);
-    if (statusEl) statusEl.textContent = 'Sending email…';
-    await sendBriefingEmail(today, briefingHtml);
-    // Save flag to blob
-    await blobUpload('briefing_' + today + '.json', JSON.stringify({ sentAt: new Date().toISOString(), sentBy: currentUser.name, manual: true }));
-    if (statusEl) statusEl.innerHTML = '<span style="color:var(--green);font-weight:600">✅ Briefing sent to ' + BRIEFING_RECIPIENT + '</span>';
-    showToast('📧 Daily briefing sent!');
-  } catch(e) {
-    console.error('Manual briefing failed:', e);
-    if (statusEl) statusEl.innerHTML = '<span style="color:var(--red)">❌ Failed: ' + (e.message || e).toString().substring(0, 100) + '</span>';
-    showToast('❌ Briefing failed: ' + e.message, false);
-  }
 }
 
 // ── Daily cache helpers — AR + DASH only fetched from blob once per day ──
@@ -2668,8 +2694,8 @@ function parseARText(csvText) {
         showToast(`✅ Data loaded: ${openCt} open · ${partialCt} partial · ${paidCt} collected`);
       }
 
-      // ── Auto-send daily briefing on first admin login after data loads ──
-      setTimeout(() => checkAndSendBriefing(), 2000);
+      // ── Auto-generate daily briefing on first admin login after data loads ──
+      setTimeout(() => checkAndShowBriefing(), 2000);
     },
     error: (err) => {
       showToast('Error parsing AR data: ' + err.message, false);
