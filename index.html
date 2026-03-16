@@ -1173,9 +1173,8 @@ function renderUI(){
 
   renderAccountsPage();
   setTimeout(initResizableColumns, 0); // defer so sticky thead is fully painted
-  renderLeaderboard();
-  renderUserPage();
-  updateCountdown();
+  // Defer non-visible pages — render only when user navigates to them
+  setTimeout(() => { renderLeaderboard(); renderUserPage(); updateCountdown(); }, 100);
 }
 
 function switchPage(pageId, clickedTab){
@@ -1214,17 +1213,14 @@ function toggleSummaryDetail(btn) {
   const hidden = detail.style.display === 'none';
   detail.style.display = hidden ? 'block' : 'none';
   btn.textContent = hidden ? '▼ Hide Detail Rows' : '▶ Show Detail Rows';
-  // Lazy-render detail rows on first open
+  // Lazy-render detail rows on first open — uses cached values
   if (hidden && window._summaryDetailDirty) {
-    _renderNow = Date.now();
     const brandMap = Object.fromEntries(BRANDS.map(b => [b.id, b.name]));
     const accts = isAdmin() ? ACCOUNTS : ACCOUNTS.filter(a => currentUser.brands.includes(a.brand));
     const rows = accts.map(a => {
       const notes = NOTES[a.id] || [];
-      const rec   = getRecStatus(a, notes);
       const lastNote = notes.length ? notes[notes.length-1] : null;
       const brandName = brandMap[a.brand] || a.brand;
-      const d2 = daysAged(a.dueDate);
       const payInfo = a.payStatus === 'partial'
         ? `<div style="font-size:12px;color:#7A4E00">${fmt(a.totalPaid||0)} rcvd / ${fmt(a.balance)} rem</div>` : '';
       return `<tr class="acct-row">
@@ -1232,8 +1228,8 @@ function toggleSummaryDetail(btn) {
         <td><span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted)">${a.id}</span></td>
         <td style="font-size:12px;color:var(--muted)">${brandName}</td>
         <td style="font-weight:600">${fmt(a.balance)}${payInfo}</td>
-        <td><span class="age-badge ${ageCls(d2)}">${ageLbl(d2)}</span></td>
-        <td><span class="rec-tag ${rec.cls}">${rec.status}</span></td>
+        <td><span class="age-badge ${a._ageCls}">${a._ageLbl}</span></td>
+        <td><span class="rec-tag ${a._recCls}">${a._recStatus}</span></td>
         <td style="font-size:12px">${lastNote?lastNote.by:'—'}</td>
         <td style="font-size:12px;color:var(--muted)">${lastNote?lastNote.date:'—'}</td>
       </tr>`;
@@ -1245,13 +1241,14 @@ function toggleSummaryDetail(btn) {
 
 function exportBrandSummary() {
   const accts = isAdmin() ? ACCOUNTS : ACCOUNTS.filter(a => currentUser.brands.includes(a.brand));
+  const brandMap = Object.fromEntries(BRANDS.map(b => [b.id, b.name]));
   const bktFn = d => { if(d<=0) return 'Current'; if(d<=30) return '0-30'; if(d<=60) return '31-60'; if(d<=90) return '61-90'; if(d<=120) return '91-120'; if(d<=180) return '121-180'; if(d<=365) return '181-365'; return '366+'; };
   const lines = [['Customer','Invoice','Brand','Balance','Days Aged','Aging Bucket','Pay Status','Last Note By','Last Note Date'].join(',')];
   accts.forEach(a => {
     const notes = NOTES[a.id] || [];
     const lastNote = notes.length ? notes[notes.length-1] : null;
-    const d = daysAged(a.dueDate);
-    const bname = BRANDS.find(b=>b.id===a.brand)?.name || a.brand || '';
+    const d = a._days !== undefined ? a._days : daysAged(a.dueDate);
+    const bname = brandMap[a.brand] || a.brand || '';
     lines.push([
       `"${(a.customer||'').replace(/"/g,'""')}"`,
       `"${a.id}"`,
@@ -1277,11 +1274,12 @@ function renderBrandSummary() {
   const bktColor  = ['#9a6200','#c85000','#cc2233','#bb0011','#990011','#78003c','#500028'];
   const bktFn = d => { if(d<=0) return null; if(d<=30) return '0-30'; if(d<=60) return '31-60'; if(d<=90) return '61-90'; if(d<=120) return '91-120'; if(d<=180) return '121-180'; if(d<=365) return '181-365'; return '366+'; };
 
-  _renderNow = Date.now();
+  // Use pre-computed cache if available
+  if (!_acctCacheStamp || (Date.now() - _acctCacheStamp) > 60000) refreshAccountCache();
   const brandMap = Object.fromEntries(BRANDS.map(b => [b.id, b.name]));
   const accts = isAdmin() ? ACCOUNTS : ACCOUNTS.filter(a => currentUser.brands.includes(a.brand));
 
-  // ── Recon status counts ──
+  // ── Recon status counts (using cached _recStatus) ──
   const statuses = ['Collected via Portal','Collected Outside Portal','Partial Pay','In Progress','Untouched','Current'];
   const counts = Object.fromEntries(statuses.map(s=>[s,0]));
   let portalCollectedAmt = 0, outsideCollectedAmt = 0, partialReceivedAmt = 0, openBal = 0;
@@ -1291,21 +1289,18 @@ function renderBrandSummary() {
   let grandTotal = 0, grandCount = 0;
 
   accts.forEach(a => {
-    const notes = NOTES[a.id] || [];
-    const rec   = getRecStatus(a, notes);
-    counts[rec.status] = (counts[rec.status] || 0) + 1;
+    counts[a._recStatus] = (counts[a._recStatus] || 0) + 1;
 
     if (a.payStatus === 'paid') {
-      const hasPortalNote = notes.some(n => !n.prePortal);
-      if (hasPortalNote) portalCollectedAmt  += (a.totalAmount || 0);
-      else               outsideCollectedAmt += (a.totalAmount || 0);
+      if (a._recStatus === 'Collected via Portal') portalCollectedAmt  += (a.totalAmount || 0);
+      else                                         outsideCollectedAmt += (a.totalAmount || 0);
     }
     if (a.payStatus === 'partial') partialReceivedAmt += (a.totalPaid  || 0);
     if (a.payStatus === 'open')    openBal            += a.balance;
 
     // Pivot: open + partial only
     if (a.payStatus !== 'paid') {
-      const d   = daysAged(a.dueDate);
+      const d   = a._days;
       const bkt = bktFn(d);
       if (bkt) {
         const bid = a.brand || '—';
@@ -2514,6 +2509,9 @@ function renderAccountsPage(){
   ACCOUNTS = ar;
   populateBrandFilter();
 
+  // Pre-compute cache for all accounts once
+  refreshAccountCache();
+
   // Banner hidden — data loads via folder picker overlay
   document.getElementById('csv-import-banner').style.display = 'none';
   document.getElementById('csv-reload-link').style.display = ACCOUNTS.length > 0 ? 'flex' : 'none';
@@ -2524,10 +2522,9 @@ function renderAccountsPage(){
   document.getElementById('acct-count').textContent = filtered.length + ' accounts';
 
   const stats = {total:0,partial:0,d30:0,d60:0,d90:0,d120:0,d180:0,d365:0,d366:0,contacted:0,balance:0,partialBal:0};
-  _renderNow = Date.now(); // refresh once for the entire renderAccountsPage pass
   filtered.forEach(a => {
     stats.total++;
-    const d = daysAged(a.dueDate); // uses cached _renderNow
+    const d = a._days; // use pre-computed cache
     if(d<=30)       stats.d30++;
     else if(d<=60)  stats.d60++;
     else if(d<=90)  stats.d90++;
@@ -2535,8 +2532,7 @@ function renderAccountsPage(){
     else if(d<=180) stats.d180++;
     else if(d<=365) stats.d365++;
     else            stats.d366++;
-    const notes = NOTES[a.id] || [];
-    if(notes.length) stats.contacted++;
+    if(a._noteCount) stats.contacted++;
     stats.balance += a.balance;
     if((a.payStatus||'open') === 'partial') { stats.partial++; stats.partialBal += (a.totalPaid||0); }
   });
@@ -2555,7 +2551,6 @@ function renderAccountsPage(){
 
   const admin1 = isAdmin();
   if(admin1) document.getElementById('bonus-col-hdr').style.display = '';
-  _renderNow = Date.now(); // refresh timestamp once for this entire render pass
   const brandMap1 = Object.fromEntries(BRANDS.map(b => [b.id, b.name]));
   const selId1 = selectedAccount ? selectedAccount.id : null;
 
@@ -2569,12 +2564,10 @@ function renderAccountsPage(){
 const _ACCT_PAGE_SIZE = 100;
 
 function _renderAcctRow(a, admin1, brandMap1, selId1) {
-  const d     = daysAged(a.dueDate);
-  const notes = NOTES[a.id] || [];
-  const rec   = getRecStatus(a, notes, d);
-  const bnus  = admin1 ? bonusFor(a, d) : '';
-  const woNote  = notes.some(n => n.needsWriteOff) ? '<span class="writeoff-flag" style="font-size:12px;margin-left:6px">⚠ W/O</span>' : '';
-  const litNote = notes.some(n => n.litigation)    ? '<span class="litigation-flag" style="font-size:12px;margin-left:4px">⚖ LIT</span>' : '';
+  // Use pre-computed cached values (refreshAccountCache) — no per-row recomputation
+  const d     = a._days;
+  const woNote  = a._hasWO  ? '<span class="writeoff-flag" style="font-size:12px;margin-left:6px">⚠ W/O</span>' : '';
+  const litNote = a._hasLit ? '<span class="litigation-flag" style="font-size:12px;margin-left:4px">⚖ LIT</span>' : '';
   const contactLine = (a.phone || a.email) ? `<div class="cust-contact">${a.phone ? `<a href="tel:${a.phone}" onclick="event.stopPropagation()">📱 ${a.phone}</a>` : ''}${a.email ? `<a href="mailto:${a.email}" onclick="event.stopPropagation()">✉ ${a.email}</a>` : ''}</div>` : '';
   const selCls = selId1 && selId1 === a.id ? ' selected' : '';
   const bname1 = brandMap1[a.brand] || a.brand || '—';
@@ -2582,7 +2575,7 @@ function _renderAcctRow(a, admin1, brandMap1, selId1) {
     <td style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${_esc(bname1)}">${_esc(bname1)}</td>
     <td><div class="cust-name">${a.customer}${woNote}${litNote}</div><div class="cust-meta">${a.job || a.jobId || ''}</div>${contactLine}</td>
     <td style="font-size:13px;white-space:nowrap">${a.dueDate || '—'}</td>
-    <td><span class="age-badge ${ageCls(d)}">${ageLbl(d)}</span></td>
+    <td><span class="age-badge ${a._ageCls}">${a._ageLbl}</span></td>
     <td><div class="bal-val">${fmt(a.balance)}</div></td>
     <td style="font-size:13px;white-space:nowrap">${a.state || '—'}</td>
     <td style="font-size:13px;max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${_esc(a.jobStatus)}">${_trunc(a.jobStatus,25)}</td>
@@ -2590,8 +2583,8 @@ function _renderAcctRow(a, admin1, brandMap1, selId1) {
     <td style="font-size:13px;max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${_esc(a.memo)}">${_trunc(a.memo,45)}</td>
     <td style="font-size:13px;white-space:nowrap">${a.invoiceDate || '—'}</td>
     <td><span class="ins-tag">${a.insurance ? '<span class="ins-dot"></span>' + a.insurance : '—'}</span></td>
-    ${admin1 ? `<td>${bnus ? '<span class="bonus-pill">'+bnus+'</span>' : '—'}</td>` : ''}
-    <td><span class="rec-tag ${rec.cls}">${rec.status}</span></td>
+    ${admin1 ? `<td>${a._bonus ? '<span class="bonus-pill">'+a._bonus+'</span>' : '—'}</td>` : ''}
+    <td><span class="rec-tag ${a._recCls}">${a._recStatus}</span></td>
   </tr>`;
 }
 
@@ -2627,11 +2620,11 @@ function _loadMoreAccounts() {
 function getFiltered(accts) {
   const search = document.getElementById('acct-search')?.value.toLowerCase() || '';
   return accts.filter(a => {
-    const d = daysAged(a.dueDate);
+    const d = a._days !== undefined ? a._days : daysAged(a.dueDate); // use cache
     const ps = a.payStatus || 'open';
     switch(currentFilter) {
-      case 'all':       return ps !== 'paid';                         // open + partial only
-      case 'collected': return ps === 'paid';                         // fully paid invoices
+      case 'all':       return ps !== 'paid';
+      case 'collected': return ps === 'paid';
       case '0-30':      return ps !== 'paid' && d <= 30;
       case '31-60':     return ps !== 'paid' && d >= 31  && d <= 60;
       case '61-90':     return ps !== 'paid' && d >= 61  && d <= 90;
@@ -2679,7 +2672,8 @@ function setFilter(f, btn){
 }
 
 function renderAccounts(){
-  _renderNow = Date.now();
+  // Cache is still valid within same session — no need to rebuild unless data changed
+  if (!_acctCacheStamp || (Date.now() - _acctCacheStamp) > 60000) refreshAccountCache();
   const visible  = visibleAccounts();
   const filtered = getFiltered(visible);
   document.getElementById('acct-count').textContent = filtered.length + ' accounts';
@@ -2871,6 +2865,7 @@ function submitNote(){
     dash_adjuster_email:dashSnap?.adjusterEmail || ''
   });
   DataLayer.saveNotes(NOTES);
+  _acctCacheStamp = 0; // invalidate cache — note changed rec status
   const woChecked = document.getElementById('f-writeoff')?.checked;
   showToast(woChecked ? '⚠ Contact logged + flagged for write-off review' : '✅ Contact logged successfully!');
   renderNotePanel(); renderAccounts();
@@ -2879,19 +2874,22 @@ function submitNote(){
 // ══ WRITE-OFF REPORT ══
 function getWriteOffItems() {
   const items = [];
+  const acctMap = {};
+  ACCOUNTS.forEach(a => { acctMap[a.id] = a; });
+  const brandMap = Object.fromEntries(BRANDS.map(b => [b.id, b.name]));
   Object.entries(NOTES).forEach(([invoiceId, noteList]) => {
     const woNotes = noteList.filter(n => n.needsWriteOff);
     if (!woNotes.length) return;
-    const acct = ACCOUNTS.find(a => a.id === invoiceId);
+    const acct = acctMap[invoiceId];
     const lastWO = woNotes[woNotes.length - 1];
     const lastNote = noteList[noteList.length - 1];
     items.push({
       invoiceId,
       customer:  acct?.customer || invoiceId,
-      brand:     BRANDS.find(b => b.id === acct?.brand)?.name || acct?.brand || '—',
+      brand:     brandMap[acct?.brand] || acct?.brand || '—',
       balance:   acct?.balance || 0,
       dueDate:   acct?.dueDate || '',
-      daysAged:  acct ? daysAged(acct.dueDate) : 0,
+      daysAged:  acct ? (acct._days !== undefined ? acct._days : daysAged(acct.dueDate)) : 0,
       flaggedBy: lastWO.by,
       flagDate:  lastWO.date,
       lastNote:  lastNote.notes || '',
@@ -2994,16 +2992,22 @@ function renderLeaderboard(){
     <div class="stat-card sc-royal"><div class="stat-lbl">Active Collectors</div><div class="stat-val sv-royal">${data.length}</div><div class="stat-sub">in campaign</div></div>
     <div class="stat-card sc-purple"><div class="stat-lbl">Total Bonuses Paid</div><div class="stat-val sv-purple">${fmt(data.reduce((s,r)=>s+(r.b25*bonus.b25+r.b50*bonus.b50+r.b250*bonus.b250),0))}</div><div class="stat-sub">this campaign</div></div>`;
 
+  // Build lookup maps once for leaderboard rendering
+  const userByName = {};
+  USERS.forEach(u => { userByName[u.name] = u; });
+  const brandNameMap = {};
+  BRANDS.forEach(b => { brandNameMap[b.id] = b.name; });
+
   document.getElementById('lb-tbody').innerHTML=data.map((r,i)=>{
     const totalBonus = r.b25*bonus.b25 + r.b50*bonus.b50 + r.b250*bonus.b250;
     const medals = ['🥇','🥈','🥉'];
-    // Look up this collector's entity from USERS
-    const cUser      = USERS.find(u => u.name === r.name);
+    // Look up this collector's entity from USERS (using map, not .find())
+    const cUser      = userByName[r.name];
     const brandNames = cUser && cUser.brands && cUser.brands.length
-      ? cUser.brands.map(bid => BRANDS.find(b=>b.id===bid)?.name || bid).join(', ')
+      ? cUser.brands.map(bid => brandNameMap[bid] || bid).join(', ')
       : '—';
     const brandShort = cUser && cUser.brands && cUser.brands.length > 2
-      ? cUser.brands.slice(0,2).map(bid => BRANDS.find(b=>b.id===bid)?.name || bid).join(', ') + ' +' + (cUser.brands.length-2)
+      ? cUser.brands.slice(0,2).map(bid => brandNameMap[bid] || bid).join(', ') + ' +' + (cUser.brands.length-2)
       : brandNames;
     const safeName = r.name.replace(/'/g,"\\'");
     return`<tr class="lb-row ${i<3?'top-'+(i+1):''}" style="cursor:pointer" onclick="toggleLBDetail('${safeName}',this)">
@@ -3159,8 +3163,9 @@ function saveBonusConfig(){
 // ══ USER MANAGEMENT ══
 function renderUserPage(){
   if(!isAdmin())return;
+  const brandMap = Object.fromEntries(BRANDS.map(b => [b.id, b.name]));
   document.getElementById('user-tbody').innerHTML=USERS.map(u=>{
-    const brandNames=u.role==='admin'?'All Brands':u.brands.map(id=>BRANDS.find(b=>b.id===id)?.name||id).join(', ');
+    const brandNames=u.role==='admin'?'All Brands':u.brands.map(id=>brandMap[id]||id).join(', ');
     return`<tr class="user-row">
       <td style="font-weight:600">${u.name}</td>
       <td style="font-family:'JetBrains Mono',monospace;font-size:12px">${u.username}</td>
@@ -3245,12 +3250,38 @@ function deleteNote(acctId, origIdx){
 // ══ UTILITIES ══
 function isAdmin() { return currentUser && currentUser.role === 'admin'; }
 function isController() { return currentUser && (currentUser.role === 'controller' || currentUser.role === 'admin'); }
-function fmt(n)      { return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:0,maximumFractionDigits:0}).format(n); }
-function fmtCents(n) { return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:2}).format(n); }
+const _fmtUSD = new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:0,maximumFractionDigits:0});
+const _fmtCents = new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:2});
+function fmt(n)      { return _fmtUSD.format(n); }
+function fmtCents(n) { return _fmtCents.format(n); }
 
 // Cache today's timestamp once per render cycle — avoids new Date() on every row
 let _renderNow = Date.now();
 function daysAged(dateStr) { return Math.floor((_renderNow - new Date(dateStr)) / 86400000); }
+
+// ── PRE-COMPUTED ACCOUNT CACHE ──
+// Avoids recomputing daysAged, getRecStatus, ageLbl, ageCls, bonusFor on every render pass
+let _acctCacheStamp = 0; // timestamp when cache was last built
+function refreshAccountCache() {
+  _renderNow = Date.now();
+  _acctCacheStamp = _renderNow;
+  const admin = isAdmin();
+  for (let i = 0; i < ACCOUNTS.length; i++) {
+    const a = ACCOUNTS[i];
+    const d = daysAged(a.dueDate);
+    const notes = NOTES[a.id] || [];
+    const rec = getRecStatus(a, notes, d);
+    a._days     = d;
+    a._recStatus = rec.status;
+    a._recCls    = rec.cls;
+    a._ageLbl    = ageLbl(d);
+    a._ageCls    = ageCls(d);
+    a._bonus     = admin ? bonusFor(a, d) : '';
+    a._hasWO     = notes.some(n => n.needsWriteOff);
+    a._hasLit    = notes.some(n => n.litigation);
+    a._noteCount = notes.length;
+  }
+}
 
 // Module-level helpers — defined once, not re-created inside .map() on every row
 function _trunc(str, n) { return str && str.length > n ? str.substring(0, n) + '\u2026' : (str || '\u2014'); }
