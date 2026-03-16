@@ -1231,9 +1231,10 @@ function setBrandFilter(val) {
 function populateBrandFilter() {
   const sel = document.getElementById('brand-filter');
   if (!sel) return;
-  const brands = isAdmin()
+  const brands = (isAdmin()
     ? BRANDS
-    : BRANDS.filter(b => currentUser.brands.includes(b.id));
+    : BRANDS.filter(b => currentUser.brands.includes(b.id)))
+    .slice().sort((a, b) => a.name.localeCompare(b.name));
   sel.innerHTML = '<option value="">All Brands</option>' +
     brands.map(b => `<option value="${b.id}">${b.name}</option>`).join('');
   if (currentBrandFilter) sel.value = currentBrandFilter;
