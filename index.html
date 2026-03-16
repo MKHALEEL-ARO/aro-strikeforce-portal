@@ -3560,10 +3560,21 @@ function renderUserPage(){
       <td style="font-size:12px;color:var(--muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${brandNames}">${brandNames}</td>
       <td><span class="status-dot ${u.active?'sd-active':'sd-inactive'}"></span>${u.active?'Active':'Inactive'}</td>
       <td style="font-size:12px;color:var(--muted)">${u.lastLogin}</td>
-      <td style="display:flex;gap:6px">
+      <td style="display:flex;gap:6px;flex-wrap:wrap">
+        ${u.role!=='admin'?`<button class="btn-sm" onclick="openEditBrands(${u.id})" style="background:rgba(0,71,159,0.08);color:var(--royal);border-color:rgba(0,71,159,0.2)">Edit Brands</button>`:''}
         <button class="btn-sm" onclick="toggleUserStatus(${u.id})">${u.active?'Deactivate':'Activate'}</button>
         <button class="btn-sm danger" onclick="resetPassword(${u.id})">Reset PW</button>
         <button class="btn-sm danger" onclick="deleteUser(${u.id})" title="Permanently remove this user">Delete</button>
+      </td>
+    </tr>
+    <tr id="edit-brands-${u.id}" style="display:none">
+      <td colspan="7" style="padding:12px 16px;background:rgba(0,71,159,0.03);border-bottom:2px solid var(--royal)">
+        <div style="font-size:12px;font-weight:700;letter-spacing:1px;color:var(--royal);margin-bottom:8px">EDIT BRAND ACCESS — ${u.name}</div>
+        <div id="edit-brands-cb-${u.id}" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px"></div>
+        <div style="display:flex;gap:8px">
+          <button class="btn-sm" onclick="saveEditBrands(${u.id})" style="background:var(--green);color:#fff;border-color:var(--green)">Save</button>
+          <button class="btn-sm" onclick="closeEditBrands(${u.id})">Cancel</button>
+        </div>
       </td>
     </tr>`;
   }).join('');
@@ -3574,7 +3585,8 @@ function renderBrandCheckboxes(){
   const wrap=document.getElementById('brand-assign-wrap');
   if(role==='admin'){wrap.style.display='none';return;}
   wrap.style.display='block';
-  document.getElementById('brand-checkboxes').innerHTML=BRANDS.map(b=>`
+  const sorted = [...BRANDS].sort((a,b) => a.name.localeCompare(b.name));
+  document.getElementById('brand-checkboxes').innerHTML=sorted.map(b=>`
     <label class="brand-cb-item">
       <input type="checkbox" value="${b.id}" />
       <span title="${b.name}">${b.name.length>28?b.name.slice(0,28)+'…':b.name}</span>
@@ -3609,6 +3621,43 @@ function toggleUserStatus(id){
 function resetPassword(id){
   const u=USERS.find(x=>x.id===id);
   if(u){const np=prompt(`Set new password for ${u.name}:`);if(np){u.password=np;DataLayer.saveUsers(USERS);showToast(`Password reset for ${u.name}`);}}
+}
+
+function openEditBrands(id) {
+  const u = USERS.find(x => x.id === id);
+  if (!u) return;
+  const row = document.getElementById('edit-brands-' + id);
+  if (!row) return;
+  // Toggle — if already open, close it
+  if (row.style.display !== 'none') { row.style.display = 'none'; return; }
+  // Close any other open edit rows
+  document.querySelectorAll('[id^="edit-brands-"]').forEach(r => { if (r.id !== 'edit-brands-' + id) r.style.display = 'none'; });
+  const container = document.getElementById('edit-brands-cb-' + id);
+  const sorted = [...BRANDS].sort((a, b) => a.name.localeCompare(b.name));
+  const currentBrands = u.brands || [];
+  container.innerHTML = sorted.map(b => `
+    <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:${currentBrands.includes(b.id)?'rgba(0,71,159,0.08)':'#fff'};cursor:pointer;white-space:nowrap">
+      <input type="checkbox" value="${b.id}" ${currentBrands.includes(b.id)?'checked':''} style="margin:0" />
+      <span title="${b.name}">${b.name.length > 30 ? b.name.slice(0,30) + '\u2026' : b.name}</span>
+    </label>`).join('');
+  row.style.display = 'table-row';
+}
+
+function saveEditBrands(id) {
+  const u = USERS.find(x => x.id === id);
+  if (!u) return;
+  const container = document.getElementById('edit-brands-cb-' + id);
+  const selected = [...container.querySelectorAll('input:checked')].map(cb => cb.value);
+  u.brands = selected;
+  DataLayer.saveUsers(USERS);
+  document.getElementById('edit-brands-' + id).style.display = 'none';
+  renderUserPage();
+  showToast('\u2705 Brand access updated for ' + u.name);
+}
+
+function closeEditBrands(id) {
+  const row = document.getElementById('edit-brands-' + id);
+  if (row) row.style.display = 'none';
 }
 
 function deleteUser(id){
