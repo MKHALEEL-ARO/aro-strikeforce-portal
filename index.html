@@ -3061,19 +3061,29 @@ function toggleLBDetail(collectorName, rowEl) {
 }
 
 function jumpToAccount(invoiceId) {
-  // Switch to Accounts page
+  // Switch to Accounts page manually (can't use switchPage — no event context)
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-accounts').classList.add('active');
+  document.querySelectorAll('.nav-tab').forEach(t => {
+    t.classList.remove('active');
+    if (t.textContent.includes('Accounts')) t.classList.add('active');
+  });
+  // Reset filter to "all" so the invoice is visible
   currentFilter = 'all';
-  showPage('page-accounts');
-  // Reset filter buttons
+  currentBrandFilter = '';
   document.querySelectorAll('#acct-filters .fbtn').forEach(b => b.classList.remove('active'));
   const allBtn = document.querySelector('#acct-filters .fbtn');
   if (allBtn) allBtn.classList.add('active');
+  const brandSel = document.getElementById('brand-filter');
+  if (brandSel) brandSel.value = '';
   renderAccounts();
-  // Find and select the row
+  // Find and select the row after render
   setTimeout(() => {
     const rows = document.querySelectorAll('.acct-row');
     for (const row of rows) {
-      if (row.getAttribute('onclick') && row.getAttribute('onclick').includes("'" + invoiceId + "'")) {
+      const onclick = row.getAttribute('onclick') || '';
+      if (onclick.includes("'" + invoiceId + "'")) {
+        document.querySelectorAll('.acct-row').forEach(r => r.classList.remove('selected'));
         row.classList.add('selected');
         row.scrollIntoView({ behavior: 'smooth', block: 'center' });
         selectedAccount = ACCOUNTS.find(a => a.id === invoiceId);
@@ -3081,7 +3091,7 @@ function jumpToAccount(invoiceId) {
         break;
       }
     }
-  }, 100);
+  }, 150);
 }
 
 // ══ RECONCILIATION ══
