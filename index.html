@@ -296,6 +296,12 @@ body{font-family:'Titillium Web',Arial,sans-serif;background:var(--ice);color:va
   position:sticky;top:0;z-index:2;background:var(--ice);
   user-select:none;
 }
+.acct-table thead th.sortable{
+  cursor:pointer;transition:color .15s;
+}
+.acct-table thead th.sortable:hover{
+  color:var(--royal);
+}
 /* ── COLUMN RESIZE HANDLES ── */
 .col-resize-handle{
   position:absolute;right:0;top:10%;height:80%;width:8px;
@@ -694,8 +700,14 @@ body{font-family:'Titillium Web',Arial,sans-serif;background:var(--ice);color:va
       <div class="col-main">
         <table class="acct-table">
           <thead><tr>
-            <th>Brand</th><th>Customer</th><th>Due Date</th><th>Age</th><th>Balance Due</th>
-            <th>State</th><th>Job Status</th><th>AR Code</th><th>Memo</th><th>Invoice Date</th>
+            <th class="sortable" onclick="toggleAcctSort('brand')">Brand <span id="sort-arrow-brand"></span></th>
+            <th class="sortable" onclick="toggleAcctSort('customer')">Customer <span id="sort-arrow-customer"></span></th>
+            <th class="sortable" onclick="toggleAcctSort('dueDate')">Due Date <span id="sort-arrow-dueDate"></span></th>
+            <th class="sortable" onclick="toggleAcctSort('age')">Age <span id="sort-arrow-age"></span></th>
+            <th class="sortable" onclick="toggleAcctSort('balance')">Balance Due <span id="sort-arrow-balance"></span></th>
+            <th class="sortable" onclick="toggleAcctSort('state')">State <span id="sort-arrow-state"></span></th>
+            <th>Job Status</th><th>AR Code</th><th>Memo</th>
+            <th class="sortable" onclick="toggleAcctSort('invoiceDate')">Invoice Date <span id="sort-arrow-invoiceDate"></span></th>
             <th>Insurance</th>
             <th id="bonus-col-hdr" style="display:none">Bonus</th><th>Status</th>
           </tr></thead>
@@ -3049,7 +3061,7 @@ function renderAccounts(){
   // Cache is still valid within same session — no need to rebuild unless data changed
   if (!_acctCacheStamp || (Date.now() - _acctCacheStamp) > 60000) refreshAccountCache();
   const visible  = visibleAccounts();
-  const filtered = getFiltered(visible);
+  const filtered = _sortAccounts(getFiltered(visible));
   document.getElementById('acct-count').textContent = filtered.length + ' accounts';
   const admin2    = isAdmin();
   const brandMap2 = Object.fromEntries(BRANDS.map(b => [b.id, b.name]));
@@ -3660,6 +3672,56 @@ function refreshAccountCache() {
 // Module-level helpers — defined once, not re-created inside .map() on every row
 function _trunc(str, n) { return str && str.length > n ? str.substring(0, n) + '\u2026' : (str || '\u2014'); }
 function _esc(str)       { return (str||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;'); }
+
+// ── Account sort state ──
+let _acctSortCol  = '';   // '', 'balance', 'age', 'customer', 'brand', 'dueDate', 'invoiceDate', 'state'
+let _acctSortDir  = 0;    // 0=none, 1=asc, -1=desc
+
+function toggleAcctSort(col) {
+  if (_acctSortCol === col) {
+    // Cycle: asc → desc → none
+    _acctSortDir = _acctSortDir === 1 ? -1 : _acctSortDir === -1 ? 0 : 1;
+    if (_acctSortDir === 0) _acctSortCol = '';
+  } else {
+    _acctSortCol = col;
+    _acctSortDir = col === 'balance' || col === 'age' ? -1 : 1; // default desc for numbers, asc for text
+  }
+  _updateSortArrows();
+  renderAccounts();
+}
+
+function _updateSortArrows() {
+  const cols = ['brand','customer','dueDate','age','balance','state','invoiceDate'];
+  cols.forEach(c => {
+    const el = document.getElementById('sort-arrow-' + c);
+    if (!el) return;
+    if (_acctSortCol === c && _acctSortDir === 1)       el.textContent = '▲';
+    else if (_acctSortCol === c && _acctSortDir === -1)  el.textContent = '▼';
+    else                                                  el.textContent = '';
+  });
+}
+
+function _sortAccounts(arr) {
+  if (!_acctSortCol || _acctSortDir === 0) return arr;
+  const brandMap = Object.fromEntries(BRANDS.map(b => [b.id, b.name]));
+  const sorted = [...arr];
+  const dir = _acctSortDir;
+  sorted.sort((a, b) => {
+    let va, vb;
+    switch (_acctSortCol) {
+      case 'balance':     va = a.balance; vb = b.balance; break;
+      case 'age':         va = a._days || 0; vb = b._days || 0; break;
+      case 'customer':    va = (a.customer || '').toLowerCase(); vb = (b.customer || '').toLowerCase(); return dir * va.localeCompare(vb);
+      case 'brand':       va = (brandMap[a.brand] || a.brand || '').toLowerCase(); vb = (brandMap[b.brand] || b.brand || '').toLowerCase(); return dir * va.localeCompare(vb);
+      case 'state':       va = (a.state || '').toLowerCase(); vb = (b.state || '').toLowerCase(); return dir * va.localeCompare(vb);
+      case 'dueDate':     va = a.dueDate || ''; vb = b.dueDate || ''; return dir * va.localeCompare(vb);
+      case 'invoiceDate': va = a.invoiceDate || ''; vb = b.invoiceDate || ''; return dir * va.localeCompare(vb);
+      default: return 0;
+    }
+    return dir * (va - vb);
+  });
+  return sorted;
+}
 
 // Debounced search — prevents full re-render on every keypress
 let _searchTimer = null;
