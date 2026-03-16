@@ -1727,6 +1727,8 @@ async function checkAndSendBriefing() {
   if (!currentUser || currentUser.role !== 'admin') return;
   if (!BLOB_SAS_URL) return;
   if (!ACCOUNTS.length) return;
+  // Requires MSAL library and an active Microsoft sign-in
+  if (typeof msal === 'undefined' || !_msalAccount) return;
 
   const today = new Date().toISOString().slice(0, 10);
   const flagFile = 'briefing_' + today + '.json';
@@ -1983,8 +1985,11 @@ function _getPriorBusinessDay(todayStr) {
 }
 
 async function sendBriefingEmail(today, htmlBody) {
+  // Ensure MSAL library is loaded
+  if (typeof msal === 'undefined') throw new Error('Microsoft auth library not loaded. Please reload the page and try again.');
   // Get a token with Mail.Send scope
   const app = await initMSAL();
+  if (!_msalAccount) throw new Error('Not signed into Microsoft. Please connect via SharePoint first, then try again.');
   const scopes = ['https://graph.microsoft.com/Mail.Send'];
   let token;
   try {
@@ -1992,7 +1997,7 @@ async function sendBriefingEmail(today, htmlBody) {
     token = result.accessToken;
   } catch(e) {
     // If silent fails, try popup (user interaction required first time)
-    if (e instanceof msal.InteractionRequiredAuthError) {
+    if (typeof msal !== 'undefined' && e instanceof msal.InteractionRequiredAuthError) {
       const result = await app.acquireTokenPopup({ scopes });
       _msalAccount = result.account;
       token = result.accessToken;
