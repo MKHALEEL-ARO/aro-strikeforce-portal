@@ -1074,12 +1074,14 @@ const _blobUsersPromise = (async function _preloadBlobUsers() {
     if (!r.ok) { _blobUsersReady = true; return; } // file doesn't exist yet — first run
     const data = JSON.parse(await r.text());
     if (data.users && data.users.length) {
-      // Merge blob users with seed (blob takes priority, seed fills gaps)
+      // Blob is the single source of truth — only ensure admin account exists
       const blobMap = {};
       data.users.forEach(u => { blobMap[u.username.toLowerCase()] = u; });
-      USERS_SEED.forEach(s => {
-        if (!blobMap[s.username.toLowerCase()]) data.users.push(s);
-      });
+      // Only re-add the admin account if somehow missing (safety net)
+      const adminSeed = USERS_SEED.find(s => s.role === 'admin');
+      if (adminSeed && !blobMap[adminSeed.username.toLowerCase()]) {
+        data.users.push(adminSeed);
+      }
       USERS = data.users;
       try { localStorage.setItem('aro_users_v2', JSON.stringify(USERS)); } catch(e) {}
     }
