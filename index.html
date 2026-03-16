@@ -2978,9 +2978,10 @@ function renderLeaderboard(){
     const brandShort = cUser && cUser.brands && cUser.brands.length > 2
       ? cUser.brands.slice(0,2).map(bid => BRANDS.find(b=>b.id===bid)?.name || bid).join(', ') + ' +' + (cUser.brands.length-2)
       : brandNames;
-    return`<tr class="lb-row ${i<3?'top-'+(i+1):''}">
+    const safeName = r.name.replace(/'/g,"\\'");
+    return`<tr class="lb-row ${i<3?'top-'+(i+1):''}" style="cursor:pointer" onclick="toggleLBDetail('${safeName}',this)">
       <td><span class="rank-badge rank-${i+1}">${medals[i]||'#'+(i+1)}</span></td>
-      <td style="font-weight:600">${r.name}</td>
+      <td style="font-weight:600">${r.name} <span style="font-size:10px;color:var(--muted)">▼</span></td>
       <td style="font-size:12px;color:var(--muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${brandNames}">${brandShort}</td>
       <td style="font-weight:700;color:var(--royal)">${r.committed>0?fmt(r.committed):'—'}</td>
       <td style="font-weight:700;color:var(--green)">${r.received>0?fmt(r.received):'—'}</td>
@@ -2991,8 +2992,70 @@ function renderLeaderboard(){
       <td style="text-align:center">${r.b50}</td>
       <td style="text-align:center">${r.b250}</td>
       <td style="font-weight:700;color:var(--gold)">${fmt(totalBonus)}</td>
+    </tr>
+    <tr class="lb-detail-row" id="lb-detail-${safeName.replace(/\s/g,'_')}" style="display:none">
+      <td colspan="12" style="padding:0"></td>
     </tr>`;
   }).join('');
+}
+
+function toggleLBDetail(collectorName, rowEl) {
+  const detailId = 'lb-detail-' + collectorName.replace(/\s/g,'_');
+  const detailRow = document.getElementById(detailId);
+  if (!detailRow) return;
+  if (detailRow.style.display !== 'none') { detailRow.style.display = 'none'; return; }
+  // Find all invoices this collector has notes on
+  const allNotes = DataLayer.getNotes();
+  const invoices = [];
+  Object.entries(allNotes).forEach(([invoiceId, noteList]) => {
+    const byCollector = noteList.filter(n => n.by === collectorName);
+    if (byCollector.length === 0) return;
+    const acct = ACCOUNTS.find(a => a.id === invoiceId);
+    const lastNote = byCollector[byCollector.length - 1];
+    const brandName = acct ? (BRANDS.find(b => b.id === acct.brand)?.name || acct.brand) : '—';
+    invoices.push({
+      id: invoiceId,
+      customer: acct ? acct.customer : '—',
+      brand: brandName,
+      balance: acct ? acct.balance : 0,
+      payStatus: acct ? acct.payStatus : '—',
+      noteCount: byCollector.length,
+      lastDate: lastNote.date || '—',
+      lastMethod: lastNote.method || '—',
+    });
+  });
+  invoices.sort((a,b) => b.balance - a.balance);
+  const rows = invoices.map(inv => {
+    const statusColor = inv.payStatus === 'paid' ? 'var(--green)' : inv.payStatus === 'partial' ? '#7A4E00' : 'var(--red)';
+    return `<tr style="font-size:12px;border-bottom:1px solid var(--border)">
+      <td style="padding:6px 10px;font-weight:600"><a href="#" onclick="event.stopPropagation();openAccountDetail('${inv.id}');return false;" style="color:var(--royal);text-decoration:underline">${inv.id}</a></td>
+      <td style="padding:6px 10px">${inv.customer}</td>
+      <td style="padding:6px 10px;color:var(--muted)">${inv.brand}</td>
+      <td style="padding:6px 10px;font-weight:700">${fmt(inv.balance)}</td>
+      <td style="padding:6px 10px;font-weight:600;color:${statusColor}">${inv.payStatus}</td>
+      <td style="padding:6px 10px;text-align:center">${inv.noteCount}</td>
+      <td style="padding:6px 10px;color:var(--muted)">${inv.lastDate}</td>
+      <td style="padding:6px 10px;color:var(--muted)">${inv.lastMethod}</td>
+    </tr>`;
+  }).join('');
+  detailRow.querySelector('td').innerHTML = `
+    <div style="background:rgba(10,15,51,0.02);padding:12px;border-radius:8px;margin:4px 0">
+      <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:8px">${collectorName}'s Invoices (${invoices.length})</div>
+      <table style="width:100%;border-collapse:collapse">
+        <thead><tr style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">
+          <th style="text-align:left;padding:4px 10px">Invoice</th>
+          <th style="text-align:left;padding:4px 10px">Customer</th>
+          <th style="text-align:left;padding:4px 10px">Brand</th>
+          <th style="text-align:left;padding:4px 10px">Balance</th>
+          <th style="text-align:left;padding:4px 10px">Status</th>
+          <th style="text-align:center;padding:4px 10px">Notes</th>
+          <th style="text-align:left;padding:4px 10px">Last Note</th>
+          <th style="text-align:left;padding:4px 10px">Method</th>
+        </tr></thead>
+        <tbody>${rows || '<tr><td colspan="8" style="padding:10px;color:var(--muted);text-align:center">No invoices found</td></tr>'}</tbody>
+      </table>
+    </div>`;
+  detailRow.style.display = 'table-row';
 }
 
 // ══ RECONCILIATION ══
