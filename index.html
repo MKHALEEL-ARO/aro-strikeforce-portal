@@ -721,7 +721,7 @@ body{font-family:'Titillium Web',Arial,sans-serif;background:var(--ice);color:va
       </div>
     </div>
     <div class="stat-grid" style="--cols:6" id="summary-stats"></div>
-    <div style="overflow-x:auto;border-radius:12px;border:1px solid var(--border);box-shadow:var(--shadow);margin-bottom:24px">
+    <div style="overflow:auto;border-radius:12px;border:1px solid var(--border);box-shadow:var(--shadow);margin-bottom:24px;max-height:70vh;">
       <table id="summary-pivot-table" style="width:100%;border-collapse:collapse;min-width:900px;"></table>
     </div>
     <div style="margin-bottom:8px;display:flex;align-items:center;justify-content:space-between">
@@ -1317,8 +1317,8 @@ function renderBrandSummary() {
 
   // ── Pivot table ──
   const thS = 'padding:8px 12px;font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);background:var(--ice);text-align:right;white-space:nowrap;';
-  const pivotHeader = `<thead><tr>
-    <th style="${thS}text-align:left;position:sticky;left:0;z-index:2;">Brand</th>
+  const pivotHeader = `<thead style="position:sticky;top:0;z-index:10;"><tr>
+    <th style="${thS}text-align:left;position:sticky;left:0;z-index:12;">Brand</th>
     ${bktLabel.map((b,i)=>`<th style="${thS}color:${bktColor[i]}">${b}</th>`).join('')}
     <th style="${thS}color:var(--navy);background:var(--ice-dark);">Open Total</th>
   </tr></thead>`;
