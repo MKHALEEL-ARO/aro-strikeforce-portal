@@ -1186,7 +1186,7 @@ function renderUI(){
   document.getElementById('tb-role-badge').className = 'tb-role role-' + currentUser.role;
   document.getElementById('tb-role-badge').textContent = currentUser.role;
 
-  const isBriefingUser = BRIEFING_USERS.includes(currentUser.name);
+  const isBriefingUser = BRIEFING_USERS.includes(currentUser.name.toLowerCase());
   const tabs = [
     {id:'page-accounts',   label:'📋 Accounts',      adminOnly:false},
     {id:'page-summary',    label:'📈 Brand Summary',  adminOnly:false},
@@ -1740,12 +1740,12 @@ async function blobSyncNotes() {
 // ══ DAILY BRIEFING ENGINE ══
 // Auto-sends a morning AR collections briefing email on first admin login each day
 
-// Allowed briefing users (name must match exactly)
-const BRIEFING_USERS = ['Mohammed Khaleel', 'Rebecca Mumma', 'Danielle McMahon'];
+// Allowed briefing users (case-insensitive match)
+const BRIEFING_USERS = ['mohammed khaleel', 'rebecca mumma', 'danielle mcmahon'];
 
 async function checkAndShowBriefing() {
   if (!currentUser || currentUser.role !== 'admin') return;
-  if (!BRIEFING_USERS.includes(currentUser.name)) return;
+  if (!BRIEFING_USERS.includes(currentUser.name.toLowerCase())) return;
   if (!BLOB_SAS_URL) return;
   if (!ACCOUNTS.length) return;
 
