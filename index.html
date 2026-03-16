@@ -1178,14 +1178,17 @@ function renderUI(){
   updateCountdown();
 }
 
-function switchPage(pageId){
+function switchPage(pageId, clickedTab){
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.getElementById(pageId).classList.add('active');
   document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
-  event.target.classList.add('active');
-  if(pageId === 'page-summary')     renderBrandSummary();
-  if(pageId === 'page-leaderboard') renderLeaderboard();
-  if(pageId === 'page-writeoff')    renderWriteOff();
+  // Use passed element, event.target, or find by page id
+  const tab = clickedTab || (typeof event !== 'undefined' && event && event.target);
+  if (tab) tab.classList.add('active');
+  else document.querySelectorAll('.nav-tab').forEach(t => { if(t.getAttribute('onclick') && t.getAttribute('onclick').includes(pageId)) t.classList.add('active'); });
+  if(pageId === 'page-summary')     requestAnimationFrame(() => renderBrandSummary());
+  if(pageId === 'page-leaderboard') requestAnimationFrame(() => renderLeaderboard());
+  if(pageId === 'page-writeoff')    requestAnimationFrame(() => renderWriteOff());
 }
 
 // ══ BRAND FILTER ══
@@ -2542,32 +2545,70 @@ function renderAccountsPage(){
   _renderNow = Date.now(); // refresh timestamp once for this entire render pass
   const brandMap1 = Object.fromEntries(BRANDS.map(b => [b.id, b.name]));
   const selId1 = selectedAccount ? selectedAccount.id : null;
-  document.getElementById('acct-tbody').innerHTML = filtered.map(a => {
-    const d     = daysAged(a.dueDate);
-    const notes = NOTES[a.id] || [];
-    const rec   = getRecStatus(a, notes, d);
-    const bnus  = admin1 ? bonusFor(a, d) : '';
-    const woNote  = notes.some(n => n.needsWriteOff) ? '<span class="writeoff-flag" style="font-size:12px;margin-left:6px">⚠ W/O</span>' : '';
-    const litNote = notes.some(n => n.litigation)    ? '<span class="litigation-flag" style="font-size:12px;margin-left:4px">⚖ LIT</span>' : '';
-    const contactLine = (a.phone || a.email) ? `<div class="cust-contact">${a.phone ? `<a href="tel:${a.phone}" onclick="event.stopPropagation()">📱 ${a.phone}</a>` : ''}${a.email ? `<a href="mailto:${a.email}" onclick="event.stopPropagation()">✉ ${a.email}</a>` : ''}</div>` : '';
-    const selCls = selId1 && selId1 === a.id ? ' selected' : '';
-    const bname1 = brandMap1[a.brand] || a.brand || '—';
-    return `<tr class="acct-row${selCls}" onclick="selectAccount(this,'${a.id}')">
-      <td style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${_esc(bname1)}">${_esc(bname1)}</td>
-      <td><div class="cust-name">${a.customer}${woNote}${litNote}</div><div class="cust-meta">${a.job || a.jobId || ''}</div>${contactLine}</td>
-      <td style="font-size:13px;white-space:nowrap">${a.dueDate || '—'}</td>
-      <td><span class="age-badge ${ageCls(d)}">${ageLbl(d)}</span></td>
-      <td><div class="bal-val">${fmt(a.balance)}</div></td>
-      <td style="font-size:13px;white-space:nowrap">${a.state || '—'}</td>
-      <td style="font-size:13px;max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${_esc(a.jobStatus)}">${_trunc(a.jobStatus,25)}</td>
-      <td style="font-size:13px;max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${_esc(a.arCode)}">${_trunc(a.arCode,25)}</td>
-      <td style="font-size:13px;max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${_esc(a.memo)}">${_trunc(a.memo,45)}</td>
-      <td style="font-size:13px;white-space:nowrap">${a.invoiceDate || '—'}</td>
-      <td><span class="ins-tag">${a.insurance ? '<span class="ins-dot"></span>' + a.insurance : '—'}</span></td>
-      ${admin1 ? `<td>${bnus ? '<span class="bonus-pill">'+bnus+'</span>' : '—'}</td>` : ''}
-      <td><span class="rec-tag ${rec.cls}">${rec.status}</span></td>
-    </tr>`;
-  }).join('');
+
+  // Store filtered list and render first page
+  window._filteredAccounts = filtered;
+  window._acctPage = 0;
+  const PAGE_SIZE = 100;
+  _renderAcctPage(filtered, 0, PAGE_SIZE, admin1, brandMap1, selId1);
+}
+
+const _ACCT_PAGE_SIZE = 100;
+
+function _renderAcctRow(a, admin1, brandMap1, selId1) {
+  const d     = daysAged(a.dueDate);
+  const notes = NOTES[a.id] || [];
+  const rec   = getRecStatus(a, notes, d);
+  const bnus  = admin1 ? bonusFor(a, d) : '';
+  const woNote  = notes.some(n => n.needsWriteOff) ? '<span class="writeoff-flag" style="font-size:12px;margin-left:6px">⚠ W/O</span>' : '';
+  const litNote = notes.some(n => n.litigation)    ? '<span class="litigation-flag" style="font-size:12px;margin-left:4px">⚖ LIT</span>' : '';
+  const contactLine = (a.phone || a.email) ? `<div class="cust-contact">${a.phone ? `<a href="tel:${a.phone}" onclick="event.stopPropagation()">📱 ${a.phone}</a>` : ''}${a.email ? `<a href="mailto:${a.email}" onclick="event.stopPropagation()">✉ ${a.email}</a>` : ''}</div>` : '';
+  const selCls = selId1 && selId1 === a.id ? ' selected' : '';
+  const bname1 = brandMap1[a.brand] || a.brand || '—';
+  return `<tr class="acct-row${selCls}" onclick="selectAccount(this,'${a.id}')">
+    <td style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${_esc(bname1)}">${_esc(bname1)}</td>
+    <td><div class="cust-name">${a.customer}${woNote}${litNote}</div><div class="cust-meta">${a.job || a.jobId || ''}</div>${contactLine}</td>
+    <td style="font-size:13px;white-space:nowrap">${a.dueDate || '—'}</td>
+    <td><span class="age-badge ${ageCls(d)}">${ageLbl(d)}</span></td>
+    <td><div class="bal-val">${fmt(a.balance)}</div></td>
+    <td style="font-size:13px;white-space:nowrap">${a.state || '—'}</td>
+    <td style="font-size:13px;max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${_esc(a.jobStatus)}">${_trunc(a.jobStatus,25)}</td>
+    <td style="font-size:13px;max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${_esc(a.arCode)}">${_trunc(a.arCode,25)}</td>
+    <td style="font-size:13px;max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${_esc(a.memo)}">${_trunc(a.memo,45)}</td>
+    <td style="font-size:13px;white-space:nowrap">${a.invoiceDate || '—'}</td>
+    <td><span class="ins-tag">${a.insurance ? '<span class="ins-dot"></span>' + a.insurance : '—'}</span></td>
+    ${admin1 ? `<td>${bnus ? '<span class="bonus-pill">'+bnus+'</span>' : '—'}</td>` : ''}
+    <td><span class="rec-tag ${rec.cls}">${rec.status}</span></td>
+  </tr>`;
+}
+
+function _renderAcctPage(filtered, page, pageSize, admin1, brandMap1, selId1) {
+  const start = page * pageSize;
+  const slice = filtered.slice(start, start + pageSize);
+  const html = slice.map(a => _renderAcctRow(a, admin1, brandMap1, selId1)).join('');
+  const hasMore = start + pageSize < filtered.length;
+  const remaining = filtered.length - start - pageSize;
+  const loadMoreBtn = hasMore
+    ? `<tr id="acct-load-more"><td colspan="13" style="text-align:center;padding:12px">
+        <button onclick="_loadMoreAccounts()" style="padding:8px 24px;border-radius:20px;border:1px solid var(--royal);background:rgba(0,71,159,0.06);color:var(--royal);font-weight:700;font-size:13px;cursor:pointer">
+          Load More (${remaining > pageSize ? pageSize : remaining} of ${remaining} remaining)
+        </button></td></tr>`
+    : '';
+  if (page === 0) {
+    document.getElementById('acct-tbody').innerHTML = html + loadMoreBtn;
+  } else {
+    const prev = document.getElementById('acct-load-more');
+    if (prev) prev.remove();
+    document.getElementById('acct-tbody').insertAdjacentHTML('beforeend', html + loadMoreBtn);
+  }
+}
+
+function _loadMoreAccounts() {
+  window._acctPage = (window._acctPage || 0) + 1;
+  const admin1 = isAdmin();
+  const brandMap1 = Object.fromEntries(BRANDS.map(b => [b.id, b.name]));
+  const selId1 = selectedAccount ? selectedAccount.id : null;
+  _renderAcctPage(window._filteredAccounts || [], window._acctPage, _ACCT_PAGE_SIZE, admin1, brandMap1, selId1);
 }
 
 function getFiltered(accts) {
@@ -2625,39 +2666,16 @@ function setFilter(f, btn){
 }
 
 function renderAccounts(){
-  _renderNow = Date.now(); // refresh timestamp once for this render pass
+  _renderNow = Date.now();
   const visible  = visibleAccounts();
   const filtered = getFiltered(visible);
   document.getElementById('acct-count').textContent = filtered.length + ' accounts';
   const admin2    = isAdmin();
   const brandMap2 = Object.fromEntries(BRANDS.map(b => [b.id, b.name]));
   const selId2    = selectedAccount ? selectedAccount.id : null;
-  document.getElementById('acct-tbody').innerHTML = filtered.map(a => {
-    const d     = daysAged(a.dueDate);
-    const notes = NOTES[a.id] || [];
-    const rec   = getRecStatus(a, notes, d);
-    const bnus  = admin2 ? bonusFor(a, d) : '';
-    const woNote  = notes.some(n => n.needsWriteOff) ? '<span class="writeoff-flag" style="font-size:12px;margin-left:6px">⚠ W/O</span>' : '';
-    const litNote = notes.some(n => n.litigation)    ? '<span class="litigation-flag" style="font-size:12px;margin-left:4px">⚖ LIT</span>' : '';
-    const contactLine = (a.phone || a.email) ? `<div class="cust-contact">${a.phone ? `<a href="tel:${a.phone}" onclick="event.stopPropagation()">📱 ${a.phone}</a>` : ''}${a.email ? `<a href="mailto:${a.email}" onclick="event.stopPropagation()">✉ ${a.email}</a>` : ''}</div>` : '';
-    const selCls = selId2 && selId2 === a.id ? ' selected' : '';
-    const bname2 = brandMap2[a.brand] || a.brand || '—';
-    return `<tr class="acct-row${selCls}" onclick="selectAccount(this,'${a.id}')">
-      <td style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${_esc(bname2)}">${_esc(bname2)}</td>
-      <td><div class="cust-name">${a.customer}${woNote}${litNote}</div><div class="cust-meta">${a.job || a.jobId || ''}</div>${contactLine}</td>
-      <td style="font-size:13px;white-space:nowrap">${a.dueDate || '—'}</td>
-      <td><span class="age-badge ${ageCls(d)}">${ageLbl(d)}</span></td>
-      <td><div class="bal-val">${fmt(a.balance)}</div></td>
-      <td style="font-size:13px;white-space:nowrap">${a.state || '—'}</td>
-      <td style="font-size:13px;max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${_esc(a.jobStatus)}">${_trunc(a.jobStatus,25)}</td>
-      <td style="font-size:13px;max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${_esc(a.arCode)}">${_trunc(a.arCode,25)}</td>
-      <td style="font-size:13px;max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${_esc(a.memo)}">${_trunc(a.memo,45)}</td>
-      <td style="font-size:13px;white-space:nowrap">${a.invoiceDate || '—'}</td>
-      <td><span class="ins-tag">${a.insurance ? '<span class="ins-dot"></span>' + a.insurance : '—'}</span></td>
-      ${admin2 ? `<td>${bnus ? '<span class="bonus-pill">'+bnus+'</span>' : '—'}</td>` : ''}
-      <td><span class="rec-tag ${rec.cls}">${rec.status}</span></td>
-    </tr>`;
-  }).join('');
+  window._filteredAccounts = filtered;
+  window._acctPage = 0;
+  _renderAcctPage(filtered, 0, _ACCT_PAGE_SIZE, admin2, brandMap2, selId2);
 }
 
 function renderNotePanel(){
@@ -2926,6 +2944,10 @@ function renderLeaderboard(){
   const campaignStart = new Date(bonus.startDate);
   const collectorMap = {};
 
+  // Build lookup map once (O(n) instead of O(n*m) with .find())
+  const acctMap = {};
+  ACCOUNTS.forEach(a => { acctMap[a.id] = a; });
+
   Object.entries(allNotes).forEach(([invoiceId, noteList]) => {
     const portalNotes = noteList.filter(n => n.source === 'portal');
     portalNotes.forEach(n => {
@@ -2934,11 +2956,10 @@ function renderLeaderboard(){
       if (!collectorMap[n.by]) collectorMap[n.by] = { name:n.by, notes:0, eligible:0, committed:0, received:0, b25:0, b50:0, b250:0 };
       collectorMap[n.by].notes++;
       if (eligible) collectorMap[n.by].eligible++;
-      // Committed: sum promise-to-pay amounts logged by this collector
       if (n.committedAmount > 0) collectorMap[n.by].committed += n.committedAmount;
     });
     // Received: credit the last collector who had a portal note on a now-paid invoice
-    const acct = ACCOUNTS.find(a => a.id === invoiceId);
+    const acct = acctMap[invoiceId];
     if (acct && acct.payStatus === 'paid' && portalNotes.length > 0) {
       const lastCollector = portalNotes[portalNotes.length - 1].by;
       if (collectorMap[lastCollector]) {
