@@ -3724,8 +3724,8 @@ function parseARText(csvText) {
 
         // Derive payment status from Sage data — Sage is the source of truth
         let payStatus = 'open';
-        if (totalDue <= 0 && dateFullyPaid)       payStatus = 'paid';
-        else if (totalPaid > 0 && totalDue > 0)   payStatus = 'partial';
+        if (totalDue <= 0)                         payStatus = 'paid';    // $0 balance = paid, with or without a fully-paid date
+        else if (totalPaid > 0 && totalDue > 0)    payStatus = 'partial';
 
         // Match brand on Entity ID (reliable) with fallback to name match
         const entityId   = (obj['Created at - Entity ID']   || obj['Entity ID']   || '').trim();
