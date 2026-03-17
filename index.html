@@ -348,7 +348,7 @@ body{font-family:'Titillium Web',Arial,sans-serif;background:var(--ice);color:va
 .acct-row td:last-child{border-right:1px solid var(--border);border-radius:0 10px 10px 0;}
 .cust-name{font-weight:600;color:var(--navy);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .cust-meta{font-size:13px;color:var(--muted);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.bal-val{font-family:'Russo One',Arial,sans-serif;font-size:18px;font-weight:700;}
+.bal-val{font-family:'Russo One',Arial,sans-serif;font-size:18px;font-weight:700;text-align:right;}
 .age-badge{display:inline-block;padding:3px 9px;border-radius:20px;font-size:12px;font-weight:700;}
 .ab-30   {background:rgba(245,166,35,0.1); color:#9a6200; border:1px solid rgba(245,166,35,0.3);}
 .ab-60   {background:rgba(200,100,0,0.1);  color:#c85000; border:1px solid rgba(200,100,0,0.3);}
@@ -707,13 +707,13 @@ body{font-family:'Titillium Web',Arial,sans-serif;background:var(--ice);color:va
           <thead><tr>
             <th class="sortable" onclick="toggleAcctSort('brand')">Brand <span id="sort-arrow-brand"></span></th>
             <th class="sortable" onclick="toggleAcctSort('customer')">Customer <span id="sort-arrow-customer"></span></th>
-            <th class="sortable" onclick="toggleAcctSort('jobId')">Job # <span id="sort-arrow-jobId"></span></th>
+            <th class="sortable" onclick="toggleAcctSort('jobId')">Job ID <span id="sort-arrow-jobId"></span></th>
             <th class="sortable" onclick="toggleAcctSort('dueDate')">Due Date <span id="sort-arrow-dueDate"></span></th>
             <th class="sortable" onclick="toggleAcctSort('age')">Age <span id="sort-arrow-age"></span></th>
             <th class="sortable" onclick="toggleAcctSort('totalAmount')">Invoice Amt <span id="sort-arrow-totalAmount"></span></th>
             <th class="sortable" onclick="toggleAcctSort('balance')">Balance Due <span id="sort-arrow-balance"></span></th>
             <th class="sortable" onclick="toggleAcctSort('state')">State <span id="sort-arrow-state"></span></th>
-            <th>Job Status</th><th>AR Code</th><th>Memo</th>
+            <th>AR Code</th><th>Memo</th>
             <th class="sortable" onclick="toggleAcctSort('invoiceDate')">Invoice Date <span id="sort-arrow-invoiceDate"></span></th>
             <th>Insurance</th>
             <th id="bonus-col-hdr" style="display:none">Bonus</th><th>Status</th>
@@ -3632,10 +3632,13 @@ function parseARText(csvText) {
         arr.sort((a, b) => b.date.localeCompare(a.date));
       });
 
-      // ── Pass 1b: Collect AR adjustments & negative AR invoices by customer+jobId ──
+      // ── Pass 1b: Collect AR adjustments & negative AR invoices ──
       // These include: QPD discounts, insurance negotiations, sales tax adjustments,
-      // TPA fees, credits, write-offs, etc. — anything that reduces the collectible amount
-      const adjustmentsByKey = {}; // "customer|jobId" → [{type, amount, date, desc, recNum, invNum}]
+      // TPA fees, credits, write-offs, etc. — anything that reduces the collectible amount.
+      // Primary key: customer|invoiceNumber (exact invoice match from Sage's Invoice number field)
+      // Fallback key: customer|jobId (for adjustments without a linked invoice number)
+      const adjustmentsByInvNum = {}; // "customer|invNum"  → [{...}]
+      const adjustmentsByJobKey = {}; // "customer|jobId"   → [{...}] (fallback only)
       for (let i = 1; i < rows.length; i++) {
         const row = rows[i];
         const obj = {};
@@ -3649,21 +3652,34 @@ function parseARText(csvText) {
         if (!isAdj && !isNegInv) continue;
 
         const cust = (obj['Customer name'] || '').trim();
-        const jobId = (obj['Reference number'] || obj['Job ID'] || obj['Document or check no.'] || '').trim();
         if (!cust) continue;
-        const key = cust + '|' + jobId;
-        if (!adjustmentsByKey[key]) adjustmentsByKey[key] = [];
-        adjustmentsByKey[key].push({
-          type: isAdj ? 'adjustment' : 'credit',
-          amount: totalAmt,
-          date: normalizeDate(obj['Date'] || ''),
-          desc: (obj['Description'] || obj['Memo'] || obj['Summary'] || '').trim(),
-          recNum: obj['Record number'] || '',
-          invNum: obj['Invoice number'] || '',
-          arCode: (obj['AR Code'] || '').trim(),
+
+        const invNum = (obj['Invoice number'] || '').trim();
+        const jobId  = (obj['Job ID'] || obj['Reference number'] || obj['Document or check no.'] || '').trim();
+
+        const adjObj = {
+          type:     isAdj ? 'adjustment' : 'credit',
+          amount:   totalAmt,
+          date:     normalizeDate(obj['Date'] || ''),
+          desc:     (obj['Description'] || obj['Memo'] || obj['Summary'] || '').trim(),
+          recNum:   obj['Record number'] || '',
+          invNum:   invNum,
+          arCode:   (obj['AR Code'] || '').trim(),
           customer: cust,
-          jobId: jobId,
-        });
+          jobId:    jobId,
+        };
+
+        if (invNum) {
+          // Primary: link by exact invoice number — prevents cross-job contamination
+          const key = cust + '|' + invNum;
+          if (!adjustmentsByInvNum[key]) adjustmentsByInvNum[key] = [];
+          adjustmentsByInvNum[key].push(adjObj);
+        } else {
+          // Fallback: no invoice number, group by job
+          const key = cust + '|' + jobId;
+          if (!adjustmentsByJobKey[key]) adjustmentsByJobKey[key] = [];
+          adjustmentsByJobKey[key].push(adjObj);
+        }
       }
 
       // ── Pass 2: Build account objects from AR invoice rows ──
@@ -3764,14 +3780,21 @@ function parseARText(csvText) {
       });
 
       // ── Pass 4: Link adjustments to accounts, compute netCollected ──
+      // Matching priority:
+      //   1. By invoice number (a.inv) — exact Sage link, prevents cross-job contamination
+      //   2. By job ID fallback (a.jobId) — for adjustments with no invoice number recorded
       accounts.forEach(a => {
         a.adjustments = [];      // [{type, amount, date, desc, recNum, invNum}]
         a.totalAdjustments = 0;  // sum of adjustment amounts (usually negative)
         a.netCollected = 0;      // actual cash = totalAmount + adjustments (adj are negative)
 
-        const jobKey = (a.ref || a.jobId || '').trim();
-        const key = a.customer + '|' + jobKey;
-        const adjs = adjustmentsByKey[key] || [];
+        // Try invoice-number match first
+        const invKey = a.customer + '|' + (a.inv || '').trim();
+        const jobKey = a.customer + '|' + (a.jobId || '').trim();
+        const byInv = (a.inv && adjustmentsByInvNum[invKey]) ? adjustmentsByInvNum[invKey] : [];
+        const byJob = (!byInv.length && a.jobId && adjustmentsByJobKey[jobKey]) ? adjustmentsByJobKey[jobKey] : [];
+        const adjs = byInv.length ? byInv : byJob;
+
         if (adjs.length) {
           a.adjustments = adjs;
           a.totalAdjustments = adjs.reduce((s, adj) => s + adj.amount, 0);
@@ -4061,13 +4084,12 @@ function _renderAcctRow(a, admin1, brandMap1, selId1) {
   return `<tr class="acct-row${selCls}" onclick="selectAccount(this,'${a.id}')">
     <td style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${_esc(bname1)}">${_esc(bname1)}</td>
     <td><div class="cust-name">${a.customer}${woNote}${litNote}</div>${contactLine}</td>
-    <td style="font-size:13px;white-space:nowrap">${a.job || a.jobId || '—'}</td>
+    <td style="font-size:13px;white-space:nowrap">${a.jobId || '—'}</td>
     <td style="font-size:13px;white-space:nowrap">${a.dueDate || '—'}</td>
     <td><span class="age-badge ${a._ageCls}">${a._ageLbl}</span></td>
-    <td style="text-align:right;font-size:13px">${fmt(a.totalAmount || 0)}</td>
-    <td><div class="bal-val">${fmt(a.balance)}</div></td>
+    <td style="text-align:right;font-size:13px;white-space:nowrap">${fmt(a.totalAmount || 0)}</td>
+    <td style="text-align:right"><div class="bal-val">${fmt(a.balance)}</div></td>
     <td style="font-size:13px;white-space:nowrap">${a.state || '—'}</td>
-    <td style="font-size:13px;max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${_esc(a.jobStatus)}">${_trunc(a.jobStatus,25)}</td>
     <td style="font-size:13px;max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${_esc(a.arCode)}">${_trunc(a.arCode,25)}</td>
     <td style="font-size:13px;max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${_esc(a.memo)}">${_trunc(a.memo,45)}</td>
     <td style="font-size:13px;white-space:nowrap">${a.invoiceDate || '—'}</td>
@@ -4084,7 +4106,7 @@ function _renderAcctPage(filtered, page, pageSize, admin1, brandMap1, selId1) {
   const hasMore = start + pageSize < filtered.length;
   const remaining = filtered.length - start - pageSize;
   const loadMoreBtn = hasMore
-    ? `<tr id="acct-load-more"><td colspan="15" style="text-align:center;padding:12px">
+    ? `<tr id="acct-load-more"><td colspan="14" style="text-align:center;padding:12px">
         <button onclick="_loadMoreAccounts()" style="padding:8px 24px;border-radius:20px;border:1px solid var(--royal);background:rgba(0,71,159,0.06);color:var(--royal);font-weight:700;font-size:13px;cursor:pointer">
           Load More (${remaining > pageSize ? pageSize : remaining} of ${remaining} remaining)
         </button></td></tr>`
