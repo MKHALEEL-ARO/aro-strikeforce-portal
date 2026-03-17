@@ -2369,7 +2369,7 @@ function renderQPDTracker() {
     <div class="stat-card sc-purple"><div class="stat-lbl">Discount Cost</div><div class="stat-val sv-purple">${fmt(totalDiscountCost)}</div><div class="stat-sub">contra-revenue</div></div>
     <div class="stat-card sc-royal"><div class="stat-lbl">Gross Invoice Amt</div><div class="stat-val sv-royal">${fmt(grossInvAmt)}</div><div class="stat-sub">${paidInvoices.length} paid invoices</div></div>
     <div class="stat-card sc-green"><div class="stat-lbl">Net Collected</div><div class="stat-val sv-green">${fmt(totalNetCollected)}</div><div class="stat-sub">after discounts</div></div>
-    <div class="stat-card" style="border-left:4px solid var(--navy)"><div class="stat-lbl">Avg Discount %</div><div class="stat-val" style="color:var(--navy)">${totalInvoices > 0 ? (invoiceList.reduce((s,i) => s + i.qpdPct, 0) / totalInvoices).toFixed(1) : '0.0'}%</div><div class="stat-sub">across all QPD invoices</div></div>
+    <div class="stat-card" style="border-left:4px solid var(--navy)"><div class="stat-lbl">Wtd Avg Discount %</div><div class="stat-val" style="color:var(--navy)">${(() => { const totalBase = invoiceList.reduce((s,i) => s + i.invoiceAmt + (i.otherAdjTotal||0), 0); return totalBase > 0 ? (totalDiscountCost / totalBase * 100).toFixed(1) : '0.0'; })()}%</div><div class="stat-sub">weighted by adj. invoice amt</div></div>
   </div>`;
 
   // Brand breakdown table
