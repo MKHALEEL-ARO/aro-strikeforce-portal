@@ -2092,6 +2092,7 @@ function renderPaidSummary() {
           <th style="text-align:left;padding:8px 8px;font-size:11px;color:#d4890a;text-transform:uppercase;letter-spacing:1px">Invoice</th>
           <th style="text-align:left;padding:8px 8px;font-size:11px;color:#d4890a;text-transform:uppercase;letter-spacing:1px">Customer</th>
           <th style="text-align:left;padding:8px 8px;font-size:11px;color:#d4890a;text-transform:uppercase;letter-spacing:1px">Brand</th>
+          <th style="text-align:left;padding:8px 8px;font-size:11px;color:#d4890a;text-transform:uppercase;letter-spacing:1px">Job ID</th>
           <th style="text-align:right;padding:8px 8px;font-size:11px;color:#d4890a;text-transform:uppercase;letter-spacing:1px">Invoice Amt</th>
           <th style="text-align:right;padding:8px 8px;font-size:11px;color:#d4890a;text-transform:uppercase;letter-spacing:1px">Adjustments</th>
           <th style="text-align:right;padding:8px 8px;font-size:11px;color:#d4890a;text-transform:uppercase;letter-spacing:1px">Net Collected</th>
@@ -2109,6 +2110,7 @@ function renderPaidSummary() {
           <td style="padding:5px 8px;font-family:monospace">${a.id}</td>
           <td style="padding:5px 8px">${a.customer}</td>
           <td style="padding:5px 8px;color:var(--muted)">${brandMap[a.brand] || a.brand || '—'}</td>
+          <td style="padding:5px 8px;font-size:11px;color:var(--muted);font-family:monospace">${a.jobId || '—'}</td>
           <td style="padding:5px 8px;text-align:right">${f(a.totalAmount || 0)}</td>
           <td style="padding:5px 8px;text-align:right;color:${adj < 0 ? '#c50000' : adj > 0 ? '#0a8a5f' : 'var(--muted)'};font-weight:${adj !== 0 ? '600' : '400'}">${adj !== 0 ? f(adj) : '—'}</td>
           <td style="padding:5px 8px;text-align:right;font-weight:700;color:#0a8a5f">${f(net)}</td>
@@ -3878,6 +3880,15 @@ function parseARText(csvText) {
         }
         // netCollected = original amount minus what was adjusted/credited away
         a.netCollected = a.totalAmount + a.totalAdjustments;
+
+        // Fallback: if the ambiguity guard blocked adjustment linking (multiple invoices
+        // sharing the same ref or job), totalAdjustments stays 0 and netCollected would
+        // equal the full invoice amount — which is wrong when the customer paid less.
+        // Sage's own 'Total paid' column is direct ground truth for cash received, so
+        // use it as a floor whenever it's non-zero and less than the invoice amount.
+        if (a.totalAdjustments === 0 && a.totalPaid > 0 && a.totalPaid < a.totalAmount) {
+          a.netCollected = a.totalPaid;
+        }
       });
 
       // Day-over-day reconciliation diff (only meaningful on reload, not first load)
