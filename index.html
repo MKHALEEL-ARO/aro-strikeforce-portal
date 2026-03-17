@@ -920,6 +920,25 @@ body{font-family:'Titillium Web',Arial,sans-serif;background:var(--ice);color:va
     </div>
   </div>
 
+  <!-- ══ QUICK PAY DISCOUNT TRACKER ══ -->
+  <div class="page" id="page-qpd">
+    <div class="sec-hdr" style="margin-bottom:16px">
+      <div class="sec-title">📄 Quick Pay Discount Tracker</div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <label style="font-size:12px;color:var(--muted)">From</label>
+        <input type="date" id="qpd-from" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);font-size:13px;font-family:'Titillium Web',sans-serif;background:#fff;color:var(--navy)" onchange="renderQPDTracker()">
+        <label style="font-size:12px;color:var(--muted)">To</label>
+        <input type="date" id="qpd-to" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);font-size:13px;font-family:'Titillium Web',sans-serif;background:#fff;color:var(--navy)" onchange="renderQPDTracker()">
+      </div>
+    </div>
+    <div id="qpd-content" style="display:flex;flex-direction:column;gap:16px">
+      <div style="text-align:center;padding:60px 20px;color:var(--muted)">
+        <div style="font-size:40px;margin-bottom:12px">📄</div>
+        <p style="font-size:14px">No Quick Pay Discount data yet. Data will appear once collectors log QPD notes on eligible brands (Paces, Archer, Semper Dry).</p>
+      </div>
+    </div>
+  </div>
+
   <!-- ══ DAILY BRIEFING PAGE ══ -->
   <div class="page" id="page-briefing">
     <div class="sec-hdr" style="margin-bottom:16px">
@@ -1214,6 +1233,7 @@ function renderUI(){
     {id:'page-summary',    label:'📈 Brand Summary',  adminOnly:false},
     {id:'page-leaderboard',label:'🏆 Leaderboard',    adminOnly:true},
     {id:'page-paid',       label:'💰 Paid Summary',    adminOnly:true},
+    {id:'page-qpd',        label:'📄 QPD Tracker',     adminOnly:true},
     {id:'page-briefing',   label:'📧 Briefing',       adminOnly:true, briefingOnly:true},
     {id:'page-writeoff',   label:'⚠ Write-Offs',      adminOnly:true},
     {id:'page-bonus',      label:'💰 Bonus Config',    adminOnly:true},
@@ -1243,6 +1263,7 @@ function switchPage(pageId, clickedTab){
   if(pageId === 'page-leaderboard') requestAnimationFrame(() => renderLeaderboard());
   if(pageId === 'page-writeoff')    requestAnimationFrame(() => renderWriteOff());
   if(pageId === 'page-paid')        requestAnimationFrame(() => initPaidSummary());
+  if(pageId === 'page-qpd')         requestAnimationFrame(() => initQPDTracker());
   if(pageId === 'page-briefing')    requestAnimationFrame(() => renderBriefingPage());
 }
 
@@ -2037,6 +2058,194 @@ function renderPaidSummary() {
       </div>
     </div>` : ''}
   `;
+}
+
+// ══ QUICK PAY DISCOUNT TRACKER ══
+function initQPDTracker() {
+  const fromEl = document.getElementById('qpd-from');
+  const toEl = document.getElementById('qpd-to');
+  // Default: campaign start to today
+  const bonus = DataLayer.getBonus();
+  const today = new Date().toISOString().slice(0, 10);
+  if (!fromEl.value) fromEl.value = normalizeDate(bonus.startDate) || today;
+  if (!toEl.value) toEl.value = today;
+  renderQPDTracker();
+}
+
+function renderQPDTracker() {
+  const container = document.getElementById('qpd-content');
+  const allNotes = DataLayer.getNotes();
+  const fromDate = document.getElementById('qpd-from')?.value || '';
+  const toDate = document.getElementById('qpd-to')?.value || '';
+
+  // Build account lookup
+  const acctMap = {};
+  ACCOUNTS.forEach(a => { acctMap[a.id] = a; });
+  const brandMap = {};
+  BRANDS.forEach(b => { brandMap[b.id] = b.name; });
+
+  // Collect all QPD notes (claim === 'Quick Pay Discount')
+  const qpdInvoices = {};  // invoiceId → { acct, notes: [], latestQPD: {} }
+  Object.entries(allNotes).forEach(([invoiceId, noteList]) => {
+    const qpdNotes = noteList.filter(n => n.claim === 'Quick Pay Discount');
+    if (!qpdNotes.length) return;
+    // Date filter on the QPD note date
+    const inRange = qpdNotes.filter(n => {
+      const nd = normalizeDate(n.date);
+      if (fromDate && nd < fromDate) return false;
+      if (toDate && nd > toDate) return false;
+      return true;
+    });
+    if (!inRange.length) return;
+    const acct = acctMap[invoiceId];
+    if (!acct) return;
+    const latest = inRange[inRange.length - 1];
+    qpdInvoices[invoiceId] = {
+      acct,
+      brand: brandMap[acct.brand] || acct.brand,
+      brandId: acct.brand,
+      qpdPct: latest.qpdPct || 0,
+      qpdAmount: latest.qpdAmount || 0,
+      qpdDate: latest.qpdDate || latest.date || '',
+      collector: latest.by || '—',
+      noteDate: latest.date || '',
+      isPaid: acct.payStatus === 'paid' || acct.payStatus === 'partial',
+      isRT: acct.isRecordTransfer || false,
+      payDate: normalizeDate(acct.dateFullyPaid || acct.paymentDate || ''),
+      payMethod: acct.paymentMethod || '',
+      invoiceAmt: acct.totalAmount || acct.balance || 0,
+    };
+  });
+
+  const qpdList = Object.values(qpdInvoices);
+
+  if (!qpdList.length) {
+    container.innerHTML = `<div style="text-align:center;padding:60px 20px;color:var(--muted)">
+      <div style="font-size:40px;margin-bottom:12px">📄</div>
+      <p style="font-size:14px">No Quick Pay Discount notes found in the selected date range.<br>Data will appear once collectors log QPD notes on eligible brands (Paces, Archer, Semper Dry).</p>
+    </div>`;
+    return;
+  }
+
+  // ── Stats ──
+  const totalOffered = qpdList.length;
+  const totalCollected = qpdList.filter(q => q.isPaid && !q.isRT).length;
+  const convRate = totalOffered > 0 ? ((totalCollected / totalOffered) * 100).toFixed(1) : '0.0';
+  const totalInvAmt = qpdList.filter(q => q.isPaid && !q.isRT).reduce((s, q) => s + q.invoiceAmt, 0);
+  const totalDiscountCost = qpdList.filter(q => q.isPaid && !q.isRT).reduce((s, q) => s + q.qpdAmount, 0);
+  const netCollected = totalInvAmt - totalDiscountCost;
+  const pendingCount = qpdList.filter(q => !q.isPaid).length;
+
+  // ── Brand breakdown ──
+  const QUICKPAY_BRANDS = ['E9000', 'E12000', 'E17000'];
+  const brandStats = {};
+  QUICKPAY_BRANDS.forEach(bid => {
+    const bName = brandMap[bid] || bid;
+    const items = qpdList.filter(q => q.brandId === bid);
+    const paid = items.filter(q => q.isPaid && !q.isRT);
+    brandStats[bid] = {
+      name: bName,
+      offered: items.length,
+      collected: paid.length,
+      convRate: items.length > 0 ? ((paid.length / items.length) * 100).toFixed(1) : '0.0',
+      invoiceAmt: paid.reduce((s, q) => s + q.invoiceAmt, 0),
+      discountCost: paid.reduce((s, q) => s + q.qpdAmount, 0),
+      pending: items.filter(q => !q.isPaid).length,
+    };
+  });
+
+  // ── Render ──
+  let html = '';
+
+  // Stat cards
+  html += `<div class="stat-grid" style="--cols:5">
+    <div class="stat-card sc-gold"><div class="stat-lbl">QPD Offered</div><div class="stat-val sv-gold">${totalOffered}</div><div class="stat-sub">invoices with discount</div></div>
+    <div class="stat-card sc-green"><div class="stat-lbl">Collected</div><div class="stat-val sv-green">${totalCollected}</div><div class="stat-sub">${convRate}% conversion</div></div>
+    <div class="stat-card sc-royal"><div class="stat-lbl">Gross Collected</div><div class="stat-val sv-royal">${fmt(totalInvAmt)}</div><div class="stat-sub">invoice face value</div></div>
+    <div class="stat-card sc-purple"><div class="stat-lbl">Discount Cost</div><div class="stat-val sv-purple">${fmt(totalDiscountCost)}</div><div class="stat-sub">contra-revenue (40040)</div></div>
+    <div class="stat-card" style="border-left:4px solid var(--navy)"><div class="stat-lbl">Net Collected</div><div class="stat-val" style="color:var(--navy)">${fmt(netCollected)}</div><div class="stat-sub">${pendingCount} still pending</div></div>
+  </div>`;
+
+  // Brand breakdown table
+  html += `<div style="background:var(--white);border-radius:12px;border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
+    <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+      <div style="font-size:14px;font-weight:700;color:var(--navy)">QPD by Brand</div>
+    </div>
+    <table id="qpd-brand-tbl" style="width:100%;border-collapse:collapse">
+      <thead><tr style="background:#0a0f33;color:#d4890a;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase">
+        <th style="padding:10px 14px;text-align:left">Brand</th>
+        <th style="padding:10px 14px;text-align:center">Offered</th>
+        <th style="padding:10px 14px;text-align:center">Collected</th>
+        <th style="padding:10px 14px;text-align:center">Pending</th>
+        <th style="padding:10px 14px;text-align:center">Conv %</th>
+        <th style="padding:10px 14px;text-align:right">Gross Collected</th>
+        <th style="padding:10px 14px;text-align:right">Discount Cost</th>
+        <th style="padding:10px 14px;text-align:right">Net Collected</th>
+      </tr></thead><tbody>`;
+  QUICKPAY_BRANDS.forEach(bid => {
+    const b = brandStats[bid];
+    if (!b) return;
+    const net = b.invoiceAmt - b.discountCost;
+    html += `<tr style="border-bottom:1px solid var(--border);font-size:13px">
+      <td style="padding:10px 14px;font-weight:600">${b.name}</td>
+      <td style="padding:10px 14px;text-align:center">${b.offered}</td>
+      <td style="padding:10px 14px;text-align:center;font-weight:700;color:var(--green)">${b.collected}</td>
+      <td style="padding:10px 14px;text-align:center;color:var(--muted)">${b.pending}</td>
+      <td style="padding:10px 14px;text-align:center;font-weight:700">${b.convRate}%</td>
+      <td style="padding:10px 14px;text-align:right">${fmt(b.invoiceAmt)}</td>
+      <td style="padding:10px 14px;text-align:right;color:#856404">${fmt(b.discountCost)}</td>
+      <td style="padding:10px 14px;text-align:right;font-weight:700;color:var(--navy)">${fmt(net)}</td>
+    </tr>`;
+  });
+  html += `</tbody></table></div>`;
+
+  // Invoice detail table
+  const sorted = qpdList.slice().sort((a, b) => {
+    if (a.isPaid && !b.isPaid) return -1;
+    if (!a.isPaid && b.isPaid) return 1;
+    return b.invoiceAmt - a.invoiceAmt;
+  });
+  html += `<div style="background:var(--white);border-radius:12px;border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
+    <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+      <div style="font-size:14px;font-weight:700;color:var(--navy)">QPD Invoice Detail (${sorted.length})</div>
+      <button class="btn-sm" onclick="_exportTableToCSV('qpd-detail-tbl','QPD_Detail.csv')" style="font-size:11px;padding:4px 10px">📥 Export CSV</button>
+    </div>
+    <div style="max-height:500px;overflow-y:auto">
+    <table id="qpd-detail-tbl" style="width:100%;border-collapse:collapse">
+      <thead><tr style="background:#0a0f33;color:#d4890a;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;position:sticky;top:0;z-index:2">
+        <th style="padding:8px 12px;text-align:left">Invoice</th>
+        <th style="padding:8px 12px;text-align:left">Customer</th>
+        <th style="padding:8px 12px;text-align:left">Brand</th>
+        <th style="padding:8px 12px;text-align:right">Invoice Amt</th>
+        <th style="padding:8px 12px;text-align:center">QPD %</th>
+        <th style="padding:8px 12px;text-align:right">Discount $</th>
+        <th style="padding:8px 12px;text-align:left">QPD Date</th>
+        <th style="padding:8px 12px;text-align:left">Collector</th>
+        <th style="padding:8px 12px;text-align:center">Status</th>
+        <th style="padding:8px 12px;text-align:left">Pay Date</th>
+        <th style="padding:8px 12px;text-align:left">Pay Method</th>
+      </tr></thead><tbody>`;
+  sorted.forEach(q => {
+    const statusColor = q.isPaid ? 'var(--green)' : 'var(--red)';
+    const statusLabel = q.isPaid ? (q.isRT ? 'Paid (RT)' : 'Paid') : 'Open';
+    const rowBg = q.isPaid && !q.isRT ? 'background:rgba(34,139,34,0.04);' : q.isRT ? 'background:rgba(90,0,0,0.04);' : '';
+    html += `<tr style="border-bottom:1px solid var(--border);font-size:12px;${rowBg}">
+      <td style="padding:7px 12px;font-weight:600"><a href="#" onclick="event.preventDefault();jumpToAccount('${q.acct.id}')" style="color:var(--royal);text-decoration:underline">${q.acct.id}</a></td>
+      <td style="padding:7px 12px">${q.acct.customer}</td>
+      <td style="padding:7px 12px;color:var(--muted)">${q.brand}</td>
+      <td style="padding:7px 12px;text-align:right;font-weight:700">${fmt(q.invoiceAmt)}</td>
+      <td style="padding:7px 12px;text-align:center;color:#856404;font-weight:700">${q.qpdPct ? q.qpdPct + '%' : '—'}</td>
+      <td style="padding:7px 12px;text-align:right;color:#856404">${q.qpdAmount ? fmt(q.qpdAmount) : '—'}</td>
+      <td style="padding:7px 12px;color:var(--muted)">${q.qpdDate || '—'}</td>
+      <td style="padding:7px 12px">${q.collector}</td>
+      <td style="padding:7px 12px;text-align:center;font-weight:600;color:${statusColor}">${statusLabel}</td>
+      <td style="padding:7px 12px;color:var(--muted)">${q.payDate || '—'}</td>
+      <td style="padding:7px 12px;color:var(--muted)">${q.payMethod || '—'}</td>
+    </tr>`;
+  });
+  html += `</tbody></table></div></div>`;
+
+  container.innerHTML = html;
 }
 
 // ══ DAILY BRIEFING ENGINE ══
