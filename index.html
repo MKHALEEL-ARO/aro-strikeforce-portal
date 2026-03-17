@@ -4438,9 +4438,7 @@ function renderNotePanel(){
     ${notes.length?`<div class="note-hist"><div class="divider"></div><h4>Previous Notes (${notes.length})</h4>
       ${notes.slice().reverse().map((n, revIdx)=>{
         const origIdx = notes.length - 1 - revIdx;
-        const canDelete = isAdmin()
-          || (isController() && selectedAccount && currentUser.brands.includes(selectedAccount.brand))
-          || (currentUser && n.by === currentUser.name);
+        const canDelete = isAdmin();
         const delBtn = canDelete ? `<button onclick="deleteNote('${selectedAccount.id}',${origIdx})" title="Delete this note" style="background:none;border:none;cursor:pointer;padding:2px 6px;border-radius:6px;font-size:13px;color:#ccc;transition:all .2s;float:right;line-height:1" onmouseover="this.style.color='var(--red)';this.style.background='rgba(192,57,43,0.08)'" onmouseout="this.style.color='#ccc';this.style.background='none'">🗑</button>` : '';
         return `<div class="note-entry">
           <div style="margin-bottom:4px;display:flex;justify-content:space-between;align-items:center">${delBtn}</div>
