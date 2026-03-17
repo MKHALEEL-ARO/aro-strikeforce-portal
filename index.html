@@ -2362,6 +2362,7 @@ function renderQPDTracker() {
       paidCount: paid.length,
       grossCollected: paid.reduce((s, i) => s + i.invoiceAmt, 0),
       discountCost: discCost,
+      otherAdj: items.reduce((s, i) => s + (i.otherAdjTotal || 0), 0),
       netCollected: paid.reduce((s, i) => s + i.netCollected, 0),
     };
   });
@@ -2375,6 +2376,7 @@ function renderQPDTracker() {
       paidCount: paid.length,
       grossCollected: paid.reduce((s, i) => s + i.invoiceAmt, 0),
       discountCost: otherBrandItems.reduce((s, i) => s + Math.abs(i.discountTotal || 0), 0),
+      otherAdj: otherBrandItems.reduce((s, i) => s + (i.otherAdjTotal || 0), 0),
       netCollected: paid.reduce((s, i) => s + i.netCollected, 0),
     };
   }
@@ -2405,28 +2407,33 @@ function renderQPDTracker() {
         <th style="padding:10px 14px;text-align:center">Paid</th>
         <th style="padding:10px 14px;text-align:right">Gross Collected</th>
         <th style="padding:10px 14px;text-align:right">Discount Cost</th>
+        <th style="padding:10px 14px;text-align:right">Adjustments</th>
         <th style="padding:10px 14px;text-align:right">Net Collected</th>
       </tr></thead><tbody>`;
   brandKeys.forEach(bid => {
     const b = brandStats[bid];
     if (!b || !b.count) return;
+    const adjColor = b.otherAdj < 0 ? 'var(--red)' : b.otherAdj > 0 ? 'var(--green)' : 'var(--muted)';
     html += `<tr style="border-bottom:1px solid var(--border);font-size:13px">
       <td style="padding:10px 14px;font-weight:600">${b.name}</td>
       <td style="padding:10px 14px;text-align:center">${b.count}</td>
       <td style="padding:10px 14px;text-align:center;font-weight:700;color:var(--green)">${b.paidCount}</td>
       <td style="padding:10px 14px;text-align:right">${fmt(b.grossCollected)}</td>
       <td style="padding:10px 14px;text-align:right;color:#856404;font-weight:600">${fmt(b.discountCost)}</td>
+      <td style="padding:10px 14px;text-align:right;font-weight:600;color:${adjColor}">${b.otherAdj ? fmt(b.otherAdj) : '—'}</td>
       <td style="padding:10px 14px;text-align:right;font-weight:700;color:var(--navy)">${fmt(b.netCollected)}</td>
     </tr>`;
   });
   // Totals row
   const totBrandGross = Object.values(brandStats).reduce((s,b) => s + b.grossCollected, 0);
   const totBrandDisc = Object.values(brandStats).reduce((s,b) => s + b.discountCost, 0);
+  const totBrandOtherAdj = Object.values(brandStats).reduce((s,b) => s + (b.otherAdj || 0), 0);
   const totBrandNet = Object.values(brandStats).reduce((s,b) => s + b.netCollected, 0);
   html += `<tr style="border-top:2px solid var(--border);font-weight:700;background:#fafbfe;font-size:13px">
     <td style="padding:10px 14px" colspan="3">TOTAL</td>
     <td style="padding:10px 14px;text-align:right">${fmt(totBrandGross)}</td>
     <td style="padding:10px 14px;text-align:right;color:#856404">${fmt(totBrandDisc)}</td>
+    <td style="padding:10px 14px;text-align:right;color:${totBrandOtherAdj < 0 ? 'var(--red)' : 'var(--muted)'}">${totBrandOtherAdj ? fmt(totBrandOtherAdj) : '—'}</td>
     <td style="padding:10px 14px;text-align:right;color:var(--navy)">${fmt(totBrandNet)}</td>
   </tr>`;
   html += `</tbody></table></div>`;
@@ -2443,6 +2450,8 @@ function renderQPDTracker() {
         <th style="padding:8px 12px;text-align:left">Invoice</th>
         <th style="padding:8px 12px;text-align:left">Customer</th>
         <th style="padding:8px 12px;text-align:left">Brand</th>
+        <th style="padding:8px 12px;text-align:left">Invoice Date</th>
+        <th style="padding:8px 12px;text-align:center">Age</th>
         <th style="padding:8px 12px;text-align:right">Invoice Amt</th>
         <th style="padding:8px 12px;text-align:right">Discount Amt</th>
         <th style="padding:8px 12px;text-align:center">QPD %</th>
@@ -2461,6 +2470,8 @@ function renderQPDTracker() {
       <td style="padding:7px 12px;font-weight:600"><a href="#" onclick="event.preventDefault();jumpToAccount('${inv.acct.id}')" style="color:var(--royal);text-decoration:underline">${inv.acct.id}</a></td>
       <td style="padding:7px 12px">${inv.acct.customer}</td>
       <td style="padding:7px 12px;color:var(--muted)">${inv.brand}</td>
+      <td style="padding:7px 12px;color:var(--muted)">${inv.acct.invoiceDate || '—'}</td>
+      <td style="padding:7px 12px;text-align:center"><span class="age-badge ${inv.acct._ageCls || ''}">${inv.acct._ageLbl || '—'}</span></td>
       <td style="padding:7px 12px;text-align:right">${fmt(inv.invoiceAmt)}</td>
       <td style="padding:7px 12px;text-align:right;font-weight:700;color:#856404">${inv.discountTotal ? fmt(inv.discountTotal) : '—'}</td>
       <td style="padding:7px 12px;text-align:center;color:#856404;font-weight:700">${inv.qpdPct ? inv.qpdPct + '%' : '—'}</td>
