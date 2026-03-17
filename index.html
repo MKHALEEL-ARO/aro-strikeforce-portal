@@ -2297,8 +2297,17 @@ function renderQPDTracker() {
     }
   });
 
-  qpdTxns.sort((a, b) => (b.date || '').localeCompare(a.date || '') || a.amount - b.amount);
-  const qpdAdjTotal = qpdTxns.reduce((s, t) => s + t.amount, 0);
+  // Only include invoices that actually have a QPD discount (discountTotal !== 0 or collector entered qpdAmount)
+  const discountInvoiceIds = new Set();
+  Object.entries(invoiceMap).forEach(([id, inv]) => {
+    if (inv.discountTotal !== 0 || inv.qpdAmount > 0) discountInvoiceIds.add(id);
+    else delete invoiceMap[id];
+  });
+
+  // Filter transactions to only those linked to invoices with a discount
+  const filteredTxns = qpdTxns.filter(t => discountInvoiceIds.has(t.invoiceId));
+  filteredTxns.sort((a, b) => (b.date || '').localeCompare(a.date || '') || a.amount - b.amount);
+  const qpdAdjTotal = filteredTxns.reduce((s, t) => s + t.amount, 0);
   const invoiceList = Object.values(invoiceMap);
   invoiceList.sort((a, b) => {
     if (a.isPaid && !b.isPaid) return -1;
@@ -2306,10 +2315,10 @@ function renderQPDTracker() {
     return Math.abs(b.adjTotal) - Math.abs(a.adjTotal);
   });
 
-  if (!qpdTxns.length) {
+  if (!filteredTxns.length) {
     container.innerHTML = `<div style="text-align:center;padding:60px 20px;color:var(--muted)">
       <div style="font-size:40px;margin-bottom:12px">📄</div>
-      <p style="font-size:14px">No adjustments found on QPD-eligible brand invoices (Paces, Archer, Semper Dry) in the selected date range.<br>Widen the date range to see historical transactions.</p>
+      <p style="font-size:14px">No Quick Pay Discount transactions found in the selected date range.<br>Only invoices with an actual QPD discount (AR adjustment) are shown here.</p>
     </div>`;
     return;
   }
@@ -2356,7 +2365,7 @@ function renderQPDTracker() {
 
   // Stat cards
   html += `<div class="stat-grid" style="--cols:5">
-    <div class="stat-card sc-gold"><div class="stat-lbl">Adjustments</div><div class="stat-val sv-gold">${qpdTxns.length}</div><div class="stat-sub">${totalInvoices} invoices</div></div>
+    <div class="stat-card sc-gold"><div class="stat-lbl">Transactions</div><div class="stat-val sv-gold">${filteredTxns.length}</div><div class="stat-sub">${totalInvoices} invoices</div></div>
     <div class="stat-card sc-purple"><div class="stat-lbl">Discount Cost</div><div class="stat-val sv-purple">${fmt(totalDiscountCost)}</div><div class="stat-sub">contra-revenue</div></div>
     <div class="stat-card sc-royal"><div class="stat-lbl">Gross Invoice Amt</div><div class="stat-val sv-royal">${fmt(grossInvAmt)}</div><div class="stat-sub">${paidInvoices.length} paid invoices</div></div>
     <div class="stat-card sc-green"><div class="stat-lbl">Net Collected</div><div class="stat-val sv-green">${fmt(totalNetCollected)}</div><div class="stat-sub">after discounts</div></div>
@@ -2451,7 +2460,7 @@ function renderQPDTracker() {
     <div style="padding:14px 18px;border-bottom:1px solid rgba(133,100,4,0.15);display:flex;justify-content:space-between;align-items:center;background:rgba(133,100,4,0.04)">
       <div>
         <div style="font-size:14px;font-weight:700;color:#856404">Adjustment Transactions — QPD Eligible Brands</div>
-        <div style="font-size:11px;color:var(--muted);margin-top:2px">${qpdTxns.length} AR adjustments &amp; credits on Paces, Archer, Semper Dry invoices — total ${fmt(Math.abs(qpdAdjTotal))}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">${filteredTxns.length} transactions on invoices with QPD discounts — total ${fmt(Math.abs(qpdAdjTotal))}</div>
       </div>
       <button class="btn-sm" onclick="_exportTableToCSV('qpd-contra-tbl','QPD_Adjustment_Transactions.csv')" style="font-size:11px;padding:4px 10px">📥 Export CSV</button>
     </div>
@@ -2470,7 +2479,7 @@ function renderQPDTracker() {
         <th style="padding:8px 10px;text-align:left">Description</th>
         <th style="padding:8px 10px;text-align:center">Status</th>
       </tr></thead><tbody>`;
-  qpdTxns.forEach((t, i) => {
+  filteredTxns.forEach((t, i) => {
     const statusColor = t.payStatus === 'paid' ? 'var(--green)' : t.payStatus === 'partial' ? '#9a6200' : 'var(--red)';
     const statusLabel = t.payStatus === 'paid' ? 'PAID' : t.payStatus === 'partial' ? 'PARTIAL' : 'OPEN';
     html += `<tr style="border-bottom:1px solid var(--border);font-size:12px;${i%2?'background:#fffdf5;':''}">
