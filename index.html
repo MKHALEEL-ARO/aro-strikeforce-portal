@@ -714,7 +714,7 @@ body{font-family:'Titillium Web',Arial,sans-serif;background:var(--ice);color:va
             <th class="sortable" onclick="toggleAcctSort('balance')">Balance Due <span id="sort-arrow-balance"></span></th>
             <th class="sortable" onclick="toggleAcctSort('state')">State <span id="sort-arrow-state"></span></th>
             <th class="sortable" onclick="toggleAcctSort('invoiceDate')">Invoice Date <span id="sort-arrow-invoiceDate"></span></th>
-            <th id="bonus-col-hdr" style="display:none">Bonus</th><th>Status</th>
+            <th id="bonus-col-hdr" style="display:none;width:70px;white-space:nowrap">Bonus</th><th style="width:105px;white-space:nowrap">Status</th>
           </tr></thead>
           <tbody id="acct-tbody"></tbody>
         </table>
@@ -4169,8 +4169,8 @@ function _renderAcctRow(a, admin1, brandMap1, selId1) {
     <td style="text-align:right"><div class="bal-val">${fmt(a.balance)}</div></td>
     <td style="font-size:13px;white-space:nowrap">${a.state || '—'}</td>
     <td style="font-size:13px;white-space:nowrap">${a.invoiceDate || '—'}</td>
-    ${admin1 ? `<td>${a._bonus ? '<span class="bonus-pill">'+a._bonus+'</span>' : '—'}</td>` : ''}
-    <td><span class="rec-tag ${a._recCls}">${a._recStatus}</span></td>
+    ${admin1 ? `<td style="white-space:nowrap;text-align:center">${a._bonus ? '<span class="bonus-pill">'+a._bonus+'</span>' : '—'}</td>` : ''}
+    <td style="white-space:nowrap"><span class="rec-tag ${a._recCls}">${a._recStatus}</span></td>
   </tr>`;
 }
 
