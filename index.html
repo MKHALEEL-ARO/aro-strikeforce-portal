@@ -2192,10 +2192,9 @@ function renderPaidSummary() {
 function initQPDTracker() {
   const fromEl = document.getElementById('qpd-from');
   const toEl = document.getElementById('qpd-to');
-  // Default: campaign start to today
-  const bonus = DataLayer.getBonus();
+  // Default: wide date range to capture all historical 40040 transactions
   const today = new Date().toISOString().slice(0, 10);
-  if (!fromEl.value) fromEl.value = normalizeDate(bonus.startDate) || today;
+  if (!fromEl.value) fromEl.value = '2025-01-01';
   if (!toEl.value) toEl.value = today;
   renderQPDTracker();
 }
@@ -2206,205 +2205,29 @@ function renderQPDTracker() {
   const fromDate = document.getElementById('qpd-from')?.value || '';
   const toDate = document.getElementById('qpd-to')?.value || '';
 
-  // Build account lookup
-  const acctMap = {};
-  ACCOUNTS.forEach(a => { acctMap[a.id] = a; });
   const brandMap = {};
   BRANDS.forEach(b => { brandMap[b.id] = b.name; });
-
-  // Collect all QPD notes (claim === 'Quick Pay Discount')
-  const qpdInvoices = {};  // invoiceId → { acct, notes: [], latestQPD: {} }
-  Object.entries(allNotes).forEach(([invoiceId, noteList]) => {
-    const qpdNotes = noteList.filter(n => n.claim === 'Quick Pay Discount');
-    if (!qpdNotes.length) return;
-    // Date filter on the QPD note date
-    const inRange = qpdNotes.filter(n => {
-      const nd = normalizeDate(n.date);
-      if (fromDate && nd < fromDate) return false;
-      if (toDate && nd > toDate) return false;
-      return true;
-    });
-    if (!inRange.length) return;
-    const acct = acctMap[invoiceId];
-    if (!acct) return;
-    const latest = inRange[inRange.length - 1];
-    qpdInvoices[invoiceId] = {
-      acct,
-      brand: brandMap[acct.brand] || acct.brand,
-      brandId: acct.brand,
-      qpdPct: latest.qpdPct || 0,
-      qpdAmount: latest.qpdAmount || 0,
-      qpdDate: latest.qpdDate || latest.date || '',
-      collector: latest.by || '—',
-      noteDate: latest.date || '',
-      isPaid: acct.payStatus === 'paid' || acct.payStatus === 'partial',
-      isRT: acct.isRecordTransfer || false,
-      payDate: normalizeDate(acct.dateFullyPaid || acct.paymentDate || ''),
-      payMethod: acct.paymentMethod || '',
-      invoiceAmt: acct.totalAmount || acct.balance || 0,
-      totalAdjustments: acct.totalAdjustments || 0,
-      netCollected: acct.netCollected || acct.totalAmount || 0,
-      adjustments: acct.adjustments || [],
-    };
-    // If collector didn't enter QPD amount, try to detect from AR adjustments
-    const q = qpdInvoices[invoiceId];
-    if (!q.qpdAmount && q.adjustments.length) {
-      // Sum all negative adjustments as the discount cost
-      const adjTotal = q.adjustments.reduce((s, adj) => s + (adj.amount < 0 ? Math.abs(adj.amount) : 0), 0);
-      if (adjTotal > 0) {
-        q.qpdAmount = adjTotal;
-        q.qpdPct = q.invoiceAmt > 0 ? parseFloat(((adjTotal / q.invoiceAmt) * 100).toFixed(1)) : 0;
-      }
-    }
-  });
-
-  const qpdList = Object.values(qpdInvoices);
-
-  if (!qpdList.length) {
-    container.innerHTML = `<div style="text-align:center;padding:60px 20px;color:var(--muted)">
-      <div style="font-size:40px;margin-bottom:12px">📄</div>
-      <p style="font-size:14px">No Quick Pay Discount notes found in the selected date range.<br>Data will appear once collectors log QPD notes on eligible brands (Paces, Archer, Semper Dry).</p>
-    </div>`;
-    return;
-  }
-
-  // ── Stats ──
-  const totalOffered = qpdList.length;
-  const paidQPD = qpdList.filter(q => q.isPaid && !q.isRT);
-  const totalCollected = paidQPD.length;
-  const convRate = totalOffered > 0 ? ((totalCollected / totalOffered) * 100).toFixed(1) : '0.0';
-  const totalInvAmt = paidQPD.reduce((s, q) => s + q.invoiceAmt, 0);
-  const totalDiscountCost = paidQPD.reduce((s, q) => s + q.qpdAmount, 0);
-  const totalNetCollected = paidQPD.reduce((s, q) => s + q.netCollected, 0);
-  const pendingCount = qpdList.filter(q => !q.isPaid).length;
-
-  // ── Brand breakdown ──
   const QUICKPAY_BRANDS = ['E9000', 'E12000', 'E17000'];
-  const brandStats = {};
-  QUICKPAY_BRANDS.forEach(bid => {
-    const bName = brandMap[bid] || bid;
-    const items = qpdList.filter(q => q.brandId === bid);
-    const paid = items.filter(q => q.isPaid && !q.isRT);
-    brandStats[bid] = {
-      name: bName,
-      offered: items.length,
-      collected: paid.length,
-      convRate: items.length > 0 ? ((paid.length / items.length) * 100).toFixed(1) : '0.0',
-      invoiceAmt: paid.reduce((s, q) => s + q.invoiceAmt, 0),
-      discountCost: paid.reduce((s, q) => s + q.qpdAmount, 0),
-      netCollected: paid.reduce((s, q) => s + q.netCollected, 0),
-      pending: items.filter(q => !q.isPaid).length,
-    };
-  });
 
-  // ── Render ──
-  let html = '';
+  // ── PRIMARY DATA SOURCE: All AR adjustments booked to contra revenue account 40040 ──
+  // These are the actual QPD transactions from Sage — the source of truth
+  const contraRevTxns = [];   // flat list of every 40040 adjustment
+  const invoiceMap = {};      // invoiceId → { acct, adjustments40040: [], ... }
 
-  // Stat cards
-  html += `<div class="stat-grid" style="--cols:5">
-    <div class="stat-card sc-gold"><div class="stat-lbl">QPD Offered</div><div class="stat-val sv-gold">${totalOffered}</div><div class="stat-sub">invoices with discount</div></div>
-    <div class="stat-card sc-green"><div class="stat-lbl">Collected</div><div class="stat-val sv-green">${totalCollected}</div><div class="stat-sub">${convRate}% conversion</div></div>
-    <div class="stat-card sc-royal"><div class="stat-lbl">Gross Collected</div><div class="stat-val sv-royal">${fmt(totalInvAmt)}</div><div class="stat-sub">invoice face value</div></div>
-    <div class="stat-card sc-purple"><div class="stat-lbl">Discount Cost</div><div class="stat-val sv-purple">${fmt(totalDiscountCost)}</div><div class="stat-sub">contra-revenue (40040)</div></div>
-    <div class="stat-card" style="border-left:4px solid var(--navy)"><div class="stat-lbl">Net Collected</div><div class="stat-val" style="color:var(--navy)">${fmt(totalNetCollected)}</div><div class="stat-sub">${pendingCount} still pending</div></div>
-  </div>`;
-
-  // Brand breakdown table
-  html += `<div style="background:var(--white);border-radius:12px;border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
-    <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-      <div style="font-size:14px;font-weight:700;color:var(--navy)">QPD by Brand</div>
-    </div>
-    <table id="qpd-brand-tbl" style="width:100%;border-collapse:collapse">
-      <thead><tr style="background:#0a0f33;color:#d4890a;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase">
-        <th style="padding:10px 14px;text-align:left">Brand</th>
-        <th style="padding:10px 14px;text-align:center">Offered</th>
-        <th style="padding:10px 14px;text-align:center">Collected</th>
-        <th style="padding:10px 14px;text-align:center">Pending</th>
-        <th style="padding:10px 14px;text-align:center">Conv %</th>
-        <th style="padding:10px 14px;text-align:right">Gross Collected</th>
-        <th style="padding:10px 14px;text-align:right">Discount Cost</th>
-        <th style="padding:10px 14px;text-align:right">Net Collected</th>
-      </tr></thead><tbody>`;
-  QUICKPAY_BRANDS.forEach(bid => {
-    const b = brandStats[bid];
-    if (!b) return;
-    const net = b.netCollected;
-    html += `<tr style="border-bottom:1px solid var(--border);font-size:13px">
-      <td style="padding:10px 14px;font-weight:600">${b.name}</td>
-      <td style="padding:10px 14px;text-align:center">${b.offered}</td>
-      <td style="padding:10px 14px;text-align:center;font-weight:700;color:var(--green)">${b.collected}</td>
-      <td style="padding:10px 14px;text-align:center;color:var(--muted)">${b.pending}</td>
-      <td style="padding:10px 14px;text-align:center;font-weight:700">${b.convRate}%</td>
-      <td style="padding:10px 14px;text-align:right">${fmt(b.invoiceAmt)}</td>
-      <td style="padding:10px 14px;text-align:right;color:#856404">${fmt(b.discountCost)}</td>
-      <td style="padding:10px 14px;text-align:right;font-weight:700;color:var(--navy)">${fmt(net)}</td>
-    </tr>`;
-  });
-  html += `</tbody></table></div>`;
-
-  // Invoice detail table
-  const sorted = qpdList.slice().sort((a, b) => {
-    if (a.isPaid && !b.isPaid) return -1;
-    if (!a.isPaid && b.isPaid) return 1;
-    return b.invoiceAmt - a.invoiceAmt;
-  });
-  html += `<div style="background:var(--white);border-radius:12px;border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
-    <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-      <div style="font-size:14px;font-weight:700;color:var(--navy)">QPD Invoice Detail (${sorted.length})</div>
-      <button class="btn-sm" onclick="_exportTableToCSV('qpd-detail-tbl','QPD_Detail.csv')" style="font-size:11px;padding:4px 10px">📥 Export CSV</button>
-    </div>
-    <div style="max-height:500px;overflow-y:auto">
-    <table id="qpd-detail-tbl" style="width:100%;border-collapse:collapse">
-      <thead><tr style="background:#0a0f33;color:#d4890a;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;position:sticky;top:0;z-index:2">
-        <th style="padding:8px 12px;text-align:left">Invoice</th>
-        <th style="padding:8px 12px;text-align:left">Customer</th>
-        <th style="padding:8px 12px;text-align:left">Brand</th>
-        <th style="padding:8px 12px;text-align:right">Invoice Amt</th>
-        <th style="padding:8px 12px;text-align:right">Adjustments</th>
-        <th style="padding:8px 12px;text-align:right">Net Collected</th>
-        <th style="padding:8px 12px;text-align:center">QPD %</th>
-        <th style="padding:8px 12px;text-align:right">Discount $</th>
-        <th style="padding:8px 12px;text-align:left">Collector</th>
-        <th style="padding:8px 12px;text-align:center">Status</th>
-        <th style="padding:8px 12px;text-align:left">Pay Date</th>
-        <th style="padding:8px 12px;text-align:left">Pay Method</th>
-      </tr></thead><tbody>`;
-  sorted.forEach(q => {
-    const statusColor = q.isPaid ? 'var(--green)' : 'var(--red)';
-    const statusLabel = q.isPaid ? (q.isRT ? 'Paid (RT)' : 'Paid') : 'Open';
-    const rowBg = q.isPaid && !q.isRT ? 'background:rgba(34,139,34,0.04);' : q.isRT ? 'background:rgba(90,0,0,0.04);' : '';
-    html += `<tr style="border-bottom:1px solid var(--border);font-size:12px;${rowBg}">
-      <td style="padding:7px 12px;font-weight:600"><a href="#" onclick="event.preventDefault();jumpToAccount('${q.acct.id}')" style="color:var(--royal);text-decoration:underline">${q.acct.id}</a></td>
-      <td style="padding:7px 12px">${q.acct.customer}</td>
-      <td style="padding:7px 12px;color:var(--muted)">${q.brand}</td>
-      <td style="padding:7px 12px;text-align:right;font-weight:700">${fmt(q.invoiceAmt)}</td>
-      <td style="padding:7px 12px;text-align:right;color:var(--red)">${q.totalAdjustments ? fmt(q.totalAdjustments) : '—'}</td>
-      <td style="padding:7px 12px;text-align:right;font-weight:700;color:var(--navy)">${fmt(q.netCollected)}</td>
-      <td style="padding:7px 12px;text-align:center;color:#856404;font-weight:700">${q.qpdPct ? q.qpdPct + '%' : '—'}</td>
-      <td style="padding:7px 12px;text-align:right;color:#856404">${q.qpdAmount ? fmt(q.qpdAmount) : '—'}</td>
-      <td style="padding:7px 12px">${q.collector}</td>
-      <td style="padding:7px 12px;text-align:center;font-weight:600;color:${statusColor}">${statusLabel}</td>
-      <td style="padding:7px 12px;color:var(--muted)">${q.payDate || '—'}</td>
-      <td style="padding:7px 12px;color:var(--muted)">${q.payMethod || '—'}</td>
-    </tr>`;
-  });
-  html += `</tbody></table></div></div>`;
-
-  // ── Contra Revenue Account 40040 Transactions ──
-  // Show ALL AR adjustments that hit contra revenue account 40040 (Quick Pay Discounts booked in Sage)
-  const contraRevTxns = [];
   ACCOUNTS.forEach(acct => {
     if (!acct.adjustments || !acct.adjustments.length) return;
     acct.adjustments.forEach(adj => {
       if (!adj.arCode || !adj.arCode.includes('40040')) return;
-      // Date filter
+      // Date filter on the adjustment date
       const adjDate = adj.date || '';
       if (fromDate && adjDate < fromDate) return;
       if (toDate && adjDate > toDate) return;
-      contraRevTxns.push({
+
+      const txn = {
         invoiceId: acct.id,
         customer: adj.customer || acct.customer,
         brand: brandMap[acct.brand] || acct.brand || '—',
+        brandId: acct.brand,
         arCode: adj.arCode,
         amount: adj.amount,
         date: adjDate,
@@ -2415,64 +2238,238 @@ function renderQPDTracker() {
         invoiceAmt: acct.totalAmount || 0,
         netCollected: acct.netCollected || acct.totalAmount || 0,
         payStatus: acct.payStatus || 'open',
-      });
+        payDate: normalizeDate(acct.dateFullyPaid || acct.paymentDate || ''),
+        payMethod: acct.paymentMethod || '',
+      };
+      contraRevTxns.push(txn);
+
+      // Group by invoice for the invoice-level summary
+      if (!invoiceMap[acct.id]) {
+        // Check for QPD portal notes on this invoice
+        const notes = allNotes[acct.id] || [];
+        const qpdNote = notes.filter(n => n.claim === 'Quick Pay Discount').pop();
+        invoiceMap[acct.id] = {
+          acct,
+          brand: brandMap[acct.brand] || acct.brand,
+          brandId: acct.brand,
+          invoiceAmt: acct.totalAmount || 0,
+          totalAdjustments: acct.totalAdjustments || 0,
+          netCollected: acct.netCollected || acct.totalAmount || 0,
+          isPaid: acct.payStatus === 'paid' || acct.payStatus === 'partial',
+          payDate: normalizeDate(acct.dateFullyPaid || acct.paymentDate || ''),
+          payMethod: acct.paymentMethod || '',
+          qpdPct: qpdNote ? (qpdNote.qpdPct || 0) : 0,
+          collector: qpdNote ? (qpdNote.by || '—') : '—',
+          adj40040Total: 0,
+          adj40040Count: 0,
+        };
+      }
+      invoiceMap[acct.id].adj40040Total += adj.amount;
+      invoiceMap[acct.id].adj40040Count++;
     });
   });
+
+  // Compute discount % from actual 40040 adjustments if not provided by collector
+  Object.values(invoiceMap).forEach(inv => {
+    if (!inv.qpdPct && inv.invoiceAmt > 0 && inv.adj40040Total !== 0) {
+      inv.qpdPct = parseFloat(((Math.abs(inv.adj40040Total) / inv.invoiceAmt) * 100).toFixed(1));
+    }
+  });
+
   contraRevTxns.sort((a, b) => (b.date || '').localeCompare(a.date || '') || a.amount - b.amount);
   const contraTotal = contraRevTxns.reduce((s, t) => s + t.amount, 0);
+  const invoiceList = Object.values(invoiceMap);
+  invoiceList.sort((a, b) => {
+    if (a.isPaid && !b.isPaid) return -1;
+    if (!a.isPaid && b.isPaid) return 1;
+    return Math.abs(b.adj40040Total) - Math.abs(a.adj40040Total);
+  });
 
-  html += `<div style="background:var(--white);border-radius:12px;border:1px solid rgba(133,100,4,0.25);box-shadow:var(--shadow);overflow:hidden">
-    <div style="padding:14px 18px;border-bottom:1px solid rgba(133,100,4,0.15);display:flex;justify-content:space-between;align-items:center;background:rgba(133,100,4,0.04)">
-      <div>
-        <div style="font-size:14px;font-weight:700;color:#856404">Contra Revenue — Account 40040</div>
-        <div style="font-size:11px;color:var(--muted);margin-top:2px">AR adjustments booked to contra revenue account 40040 in Sage (${contraRevTxns.length} transactions, ${fmt(Math.abs(contraTotal))} total)</div>
-      </div>
-      ${contraRevTxns.length ? '<button class="btn-sm" onclick="_exportTableToCSV(\'qpd-contra-tbl\',\'Contra_Revenue_40040.csv\')" style="font-size:11px;padding:4px 10px">📥 Export CSV</button>' : ''}
+  if (!contraRevTxns.length) {
+    container.innerHTML = `<div style="text-align:center;padding:60px 20px;color:var(--muted)">
+      <div style="font-size:40px;margin-bottom:12px">📄</div>
+      <p style="font-size:14px">No contra revenue transactions (account 40040) found in the selected date range.<br>Widen the date range or check that the AR data includes adjustments with AR Code 40040.</p>
     </div>`;
+    return;
+  }
 
-  if (contraRevTxns.length) {
-    html += `<div style="max-height:500px;overflow-y:auto">
-    <table id="qpd-contra-tbl" style="width:100%;border-collapse:collapse">
-      <thead><tr style="background:#4a3800;color:#ffd54f;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;position:sticky;top:0;z-index:2">
-        <th style="padding:8px 12px;text-align:left">Record #</th>
-        <th style="padding:8px 12px;text-align:left">Date</th>
+  // ── Stats ──
+  const totalInvoices = invoiceList.length;
+  const paidInvoices = invoiceList.filter(i => i.isPaid);
+  const totalDiscountCost = Math.abs(contraTotal);
+  const grossInvAmt = paidInvoices.reduce((s, i) => s + i.invoiceAmt, 0);
+  const totalNetCollected = paidInvoices.reduce((s, i) => s + i.netCollected, 0);
+
+  // ── Brand breakdown ──
+  const brandStats = {};
+  QUICKPAY_BRANDS.forEach(bid => {
+    const bName = brandMap[bid] || bid;
+    const items = invoiceList.filter(i => i.brandId === bid);
+    const paid = items.filter(i => i.isPaid);
+    const discCost = items.reduce((s, i) => s + Math.abs(i.adj40040Total), 0);
+    brandStats[bid] = {
+      name: bName,
+      count: items.length,
+      paidCount: paid.length,
+      grossCollected: paid.reduce((s, i) => s + i.invoiceAmt, 0),
+      discountCost: discCost,
+      netCollected: paid.reduce((s, i) => s + i.netCollected, 0),
+    };
+  });
+  // Catch any brands outside the QPD-eligible list
+  const otherBrandItems = invoiceList.filter(i => !QUICKPAY_BRANDS.includes(i.brandId));
+  if (otherBrandItems.length) {
+    const paid = otherBrandItems.filter(i => i.isPaid);
+    brandStats['OTHER'] = {
+      name: 'Other Brands',
+      count: otherBrandItems.length,
+      paidCount: paid.length,
+      grossCollected: paid.reduce((s, i) => s + i.invoiceAmt, 0),
+      discountCost: otherBrandItems.reduce((s, i) => s + Math.abs(i.adj40040Total), 0),
+      netCollected: paid.reduce((s, i) => s + i.netCollected, 0),
+    };
+  }
+
+  // ── Render ──
+  let html = '';
+
+  // Stat cards
+  html += `<div class="stat-grid" style="--cols:5">
+    <div class="stat-card sc-gold"><div class="stat-lbl">40040 Transactions</div><div class="stat-val sv-gold">${contraRevTxns.length}</div><div class="stat-sub">${totalInvoices} invoices</div></div>
+    <div class="stat-card sc-purple"><div class="stat-lbl">Discount Cost</div><div class="stat-val sv-purple">${fmt(totalDiscountCost)}</div><div class="stat-sub">contra-revenue (40040)</div></div>
+    <div class="stat-card sc-royal"><div class="stat-lbl">Gross Invoice Amt</div><div class="stat-val sv-royal">${fmt(grossInvAmt)}</div><div class="stat-sub">${paidInvoices.length} paid invoices</div></div>
+    <div class="stat-card sc-green"><div class="stat-lbl">Net Collected</div><div class="stat-val sv-green">${fmt(totalNetCollected)}</div><div class="stat-sub">after discounts</div></div>
+    <div class="stat-card" style="border-left:4px solid var(--navy)"><div class="stat-lbl">Avg Discount %</div><div class="stat-val" style="color:var(--navy)">${totalInvoices > 0 ? (invoiceList.reduce((s,i) => s + i.qpdPct, 0) / totalInvoices).toFixed(1) : '0.0'}%</div><div class="stat-sub">across all QPD invoices</div></div>
+  </div>`;
+
+  // Brand breakdown table
+  const brandKeys = [...QUICKPAY_BRANDS];
+  if (brandStats['OTHER']) brandKeys.push('OTHER');
+  html += `<div style="background:var(--white);border-radius:12px;border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
+    <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+      <div style="font-size:14px;font-weight:700;color:var(--navy)">QPD by Brand</div>
+    </div>
+    <table id="qpd-brand-tbl" style="width:100%;border-collapse:collapse">
+      <thead><tr style="background:#0a0f33;color:#d4890a;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase">
+        <th style="padding:10px 14px;text-align:left">Brand</th>
+        <th style="padding:10px 14px;text-align:center">Invoices</th>
+        <th style="padding:10px 14px;text-align:center">Paid</th>
+        <th style="padding:10px 14px;text-align:right">Gross Collected</th>
+        <th style="padding:10px 14px;text-align:right">Discount Cost (40040)</th>
+        <th style="padding:10px 14px;text-align:right">Net Collected</th>
+      </tr></thead><tbody>`;
+  brandKeys.forEach(bid => {
+    const b = brandStats[bid];
+    if (!b || !b.count) return;
+    html += `<tr style="border-bottom:1px solid var(--border);font-size:13px">
+      <td style="padding:10px 14px;font-weight:600">${b.name}</td>
+      <td style="padding:10px 14px;text-align:center">${b.count}</td>
+      <td style="padding:10px 14px;text-align:center;font-weight:700;color:var(--green)">${b.paidCount}</td>
+      <td style="padding:10px 14px;text-align:right">${fmt(b.grossCollected)}</td>
+      <td style="padding:10px 14px;text-align:right;color:#856404;font-weight:600">${fmt(b.discountCost)}</td>
+      <td style="padding:10px 14px;text-align:right;font-weight:700;color:var(--navy)">${fmt(b.netCollected)}</td>
+    </tr>`;
+  });
+  // Totals row
+  const totBrandGross = Object.values(brandStats).reduce((s,b) => s + b.grossCollected, 0);
+  const totBrandDisc = Object.values(brandStats).reduce((s,b) => s + b.discountCost, 0);
+  const totBrandNet = Object.values(brandStats).reduce((s,b) => s + b.netCollected, 0);
+  html += `<tr style="border-top:2px solid var(--border);font-weight:700;background:#fafbfe;font-size:13px">
+    <td style="padding:10px 14px" colspan="3">TOTAL</td>
+    <td style="padding:10px 14px;text-align:right">${fmt(totBrandGross)}</td>
+    <td style="padding:10px 14px;text-align:right;color:#856404">${fmt(totBrandDisc)}</td>
+    <td style="padding:10px 14px;text-align:right;color:var(--navy)">${fmt(totBrandNet)}</td>
+  </tr>`;
+  html += `</tbody></table></div>`;
+
+  // Invoice-level summary (grouped by invoice)
+  html += `<div style="background:var(--white);border-radius:12px;border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden">
+    <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+      <div style="font-size:14px;font-weight:700;color:var(--navy)">QPD Invoice Summary (${invoiceList.length})</div>
+      <button class="btn-sm" onclick="_exportTableToCSV('qpd-inv-tbl','QPD_Invoice_Summary.csv')" style="font-size:11px;padding:4px 10px">📥 Export CSV</button>
+    </div>
+    <div style="max-height:500px;overflow-y:auto">
+    <table id="qpd-inv-tbl" style="width:100%;border-collapse:collapse">
+      <thead><tr style="background:#0a0f33;color:#d4890a;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;position:sticky;top:0;z-index:2">
         <th style="padding:8px 12px;text-align:left">Invoice</th>
         <th style="padding:8px 12px;text-align:left">Customer</th>
         <th style="padding:8px 12px;text-align:left">Brand</th>
-        <th style="padding:8px 12px;text-align:left">AR Code</th>
-        <th style="padding:8px 12px;text-align:right">Contra Amt</th>
         <th style="padding:8px 12px;text-align:right">Invoice Amt</th>
+        <th style="padding:8px 12px;text-align:right">Discount (40040)</th>
+        <th style="padding:8px 12px;text-align:center">QPD %</th>
         <th style="padding:8px 12px;text-align:right">Net Collected</th>
-        <th style="padding:8px 12px;text-align:left">Description</th>
-        <th style="padding:8px 12px;text-align:center">Pay Status</th>
+        <th style="padding:8px 12px;text-align:left">Collector</th>
+        <th style="padding:8px 12px;text-align:center">Status</th>
+        <th style="padding:8px 12px;text-align:left">Pay Date</th>
+        <th style="padding:8px 12px;text-align:left">Method</th>
       </tr></thead><tbody>`;
-    contraRevTxns.forEach((t, i) => {
-      const statusColor = t.payStatus === 'paid' ? 'var(--green)' : t.payStatus === 'partial' ? '#9a6200' : 'var(--red)';
-      const statusLabel = t.payStatus === 'paid' ? 'PAID' : t.payStatus === 'partial' ? 'PARTIAL' : 'OPEN';
-      html += `<tr style="border-bottom:1px solid var(--border);font-size:12px;${i%2?'background:#fffdf5;':''}">
-        <td style="padding:7px 12px;font-family:monospace;font-size:11px">${t.recNum || '—'}</td>
-        <td style="padding:7px 12px;color:var(--muted)">${t.date || '—'}</td>
-        <td style="padding:7px 12px;font-weight:600"><a href="#" onclick="event.preventDefault();jumpToAccount('${t.invoiceId}')" style="color:var(--royal);text-decoration:underline">${t.invoiceId}</a></td>
-        <td style="padding:7px 12px">${t.customer}</td>
-        <td style="padding:7px 12px;color:var(--muted)">${t.brand}</td>
-        <td style="padding:7px 12px;font-family:monospace;font-size:11px;color:#856404">${t.arCode}</td>
-        <td style="padding:7px 12px;text-align:right;font-weight:700;color:var(--red)">${fmt(t.amount)}</td>
-        <td style="padding:7px 12px;text-align:right">${fmt(t.invoiceAmt)}</td>
-        <td style="padding:7px 12px;text-align:right;font-weight:700;color:var(--navy)">${fmt(t.netCollected)}</td>
-        <td style="padding:7px 12px;color:var(--muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(t.desc||'').replace(/"/g,'&quot;')}">${t.desc || '—'}</td>
-        <td style="padding:7px 12px;text-align:center"><span style="font-size:11px;font-weight:600;color:${statusColor}">${statusLabel}</span></td>
-      </tr>`;
-    });
-    html += `<tr style="border-top:2px solid rgba(133,100,4,0.3);font-weight:700;background:rgba(133,100,4,0.06)">
-      <td colspan="6" style="padding:8px 12px;color:#856404;font-size:12px">TOTAL CONTRA REVENUE (40040)</td>
-      <td style="padding:8px 12px;text-align:right;color:var(--red);font-size:13px">${fmt(contraTotal)}</td>
-      <td colspan="4"></td>
+  invoiceList.forEach((inv, i) => {
+    const statusColor = inv.isPaid ? 'var(--green)' : 'var(--red)';
+    const statusLabel = inv.isPaid ? 'Paid' : 'Open';
+    const rowBg = inv.isPaid ? 'background:rgba(34,139,34,0.04);' : '';
+    html += `<tr style="border-bottom:1px solid var(--border);font-size:12px;${rowBg}">
+      <td style="padding:7px 12px;font-weight:600"><a href="#" onclick="event.preventDefault();jumpToAccount('${inv.acct.id}')" style="color:var(--royal);text-decoration:underline">${inv.acct.id}</a></td>
+      <td style="padding:7px 12px">${inv.acct.customer}</td>
+      <td style="padding:7px 12px;color:var(--muted)">${inv.brand}</td>
+      <td style="padding:7px 12px;text-align:right">${fmt(inv.invoiceAmt)}</td>
+      <td style="padding:7px 12px;text-align:right;font-weight:700;color:var(--red)">${fmt(inv.adj40040Total)}</td>
+      <td style="padding:7px 12px;text-align:center;color:#856404;font-weight:700">${inv.qpdPct ? inv.qpdPct + '%' : '—'}</td>
+      <td style="padding:7px 12px;text-align:right;font-weight:700;color:var(--navy)">${fmt(inv.netCollected)}</td>
+      <td style="padding:7px 12px">${inv.collector}</td>
+      <td style="padding:7px 12px;text-align:center;font-weight:600;color:${statusColor}">${statusLabel}</td>
+      <td style="padding:7px 12px;color:var(--muted)">${inv.payDate || '—'}</td>
+      <td style="padding:7px 12px;color:var(--muted)">${inv.payMethod || '—'}</td>
     </tr>`;
-    html += `</tbody></table></div>`;
-  } else {
-    html += `<div style="text-align:center;padding:30px;color:var(--muted);font-size:13px">No contra revenue transactions (account 40040) found in the selected date range.</div>`;
-  }
-  html += `</div>`;
+  });
+  html += `</tbody></table></div></div>`;
+
+  // Transaction-level detail (every individual 40040 adjustment)
+  html += `<div style="background:var(--white);border-radius:12px;border:1px solid rgba(133,100,4,0.25);box-shadow:var(--shadow);overflow:hidden">
+    <div style="padding:14px 18px;border-bottom:1px solid rgba(133,100,4,0.15);display:flex;justify-content:space-between;align-items:center;background:rgba(133,100,4,0.04)">
+      <div>
+        <div style="font-size:14px;font-weight:700;color:#856404">Contra Revenue Transactions — Account 40040</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">${contraRevTxns.length} AR adjustments booked to 40040 — total ${fmt(Math.abs(contraTotal))}</div>
+      </div>
+      <button class="btn-sm" onclick="_exportTableToCSV('qpd-contra-tbl','Contra_Revenue_40040.csv')" style="font-size:11px;padding:4px 10px">📥 Export CSV</button>
+    </div>
+    <div style="max-height:500px;overflow-y:auto">
+    <table id="qpd-contra-tbl" style="width:100%;border-collapse:collapse">
+      <thead><tr style="background:#4a3800;color:#ffd54f;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;position:sticky;top:0;z-index:2">
+        <th style="padding:8px 10px;text-align:left">Record #</th>
+        <th style="padding:8px 10px;text-align:left">Date</th>
+        <th style="padding:8px 10px;text-align:left">Invoice</th>
+        <th style="padding:8px 10px;text-align:left">Customer</th>
+        <th style="padding:8px 10px;text-align:left">Brand</th>
+        <th style="padding:8px 10px;text-align:left">AR Code</th>
+        <th style="padding:8px 10px;text-align:right">Contra Amt</th>
+        <th style="padding:8px 10px;text-align:right">Invoice Amt</th>
+        <th style="padding:8px 10px;text-align:right">Net Collected</th>
+        <th style="padding:8px 10px;text-align:left">Description</th>
+        <th style="padding:8px 10px;text-align:center">Status</th>
+      </tr></thead><tbody>`;
+  contraRevTxns.forEach((t, i) => {
+    const statusColor = t.payStatus === 'paid' ? 'var(--green)' : t.payStatus === 'partial' ? '#9a6200' : 'var(--red)';
+    const statusLabel = t.payStatus === 'paid' ? 'PAID' : t.payStatus === 'partial' ? 'PARTIAL' : 'OPEN';
+    html += `<tr style="border-bottom:1px solid var(--border);font-size:12px;${i%2?'background:#fffdf5;':''}">
+      <td style="padding:6px 10px;font-family:monospace;font-size:11px">${t.recNum || '—'}</td>
+      <td style="padding:6px 10px;color:var(--muted)">${t.date || '—'}</td>
+      <td style="padding:6px 10px;font-weight:600"><a href="#" onclick="event.preventDefault();jumpToAccount('${t.invoiceId}')" style="color:var(--royal);text-decoration:underline">${t.invoiceId}</a></td>
+      <td style="padding:6px 10px">${t.customer}</td>
+      <td style="padding:6px 10px;color:var(--muted)">${t.brand}</td>
+      <td style="padding:6px 10px;font-family:monospace;font-size:11px;color:#856404">${t.arCode}</td>
+      <td style="padding:6px 10px;text-align:right;font-weight:700;color:var(--red)">${fmt(t.amount)}</td>
+      <td style="padding:6px 10px;text-align:right">${fmt(t.invoiceAmt)}</td>
+      <td style="padding:6px 10px;text-align:right;font-weight:700;color:var(--navy)">${fmt(t.netCollected)}</td>
+      <td style="padding:6px 10px;color:var(--muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(t.desc||'').replace(/"/g,'&quot;')}">${t.desc || '—'}</td>
+      <td style="padding:6px 10px;text-align:center"><span style="font-size:11px;font-weight:600;color:${statusColor}">${statusLabel}</span></td>
+    </tr>`;
+  });
+  html += `<tr style="border-top:2px solid rgba(133,100,4,0.3);font-weight:700;background:rgba(133,100,4,0.06)">
+    <td colspan="6" style="padding:8px 10px;color:#856404;font-size:12px">TOTAL CONTRA REVENUE (40040)</td>
+    <td style="padding:8px 10px;text-align:right;color:var(--red);font-size:13px">${fmt(contraTotal)}</td>
+    <td colspan="4"></td>
+  </tr>`;
+  html += `</tbody></table></div></div>`;
 
   container.innerHTML = html;
 }
