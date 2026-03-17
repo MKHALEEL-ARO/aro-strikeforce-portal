@@ -321,16 +321,16 @@ body{font-family:'Titillium Web',Arial,sans-serif;background:var(--ice);color:va
   transform:scaleX(2);
 }
 /* Column widths */
-.acct-table th:nth-child(1)  {width:140px;}  /* Brand          */
-.acct-table th:nth-child(2)  {width:210px;}  /* Customer       */
-.acct-table th:nth-child(3)  {width: 90px;}  /* Job ID         */
-.acct-table th:nth-child(4)  {width: 90px;}  /* Due Date       */
-.acct-table th:nth-child(5)  {width: 75px;}  /* Age            */
-.acct-table th:nth-child(6)  {width:105px;}  /* Invoice Amt    */
-.acct-table th:nth-child(7)  {width:115px;}  /* Net Collectible*/
-.acct-table th:nth-child(8)  {width:115px;}  /* Balance Due    */
-.acct-table th:nth-child(9)  {width: 70px;}  /* State          */
-.acct-table th:nth-child(10) {width: 95px;}  /* Invoice Date   */
+.acct-table th:nth-child(1)  {width:105px;}  /* Brand          */
+.acct-table th:nth-child(2)  {width:180px;}  /* Customer       */
+.acct-table th:nth-child(3)  {width: 80px;}  /* Job ID         */
+.acct-table th:nth-child(4)  {width: 80px;}  /* Due Date       */
+.acct-table th:nth-child(5)  {width: 65px;}  /* Age            */
+.acct-table th:nth-child(6)  {width: 80px;}  /* Invoice Amt    */
+.acct-table th:nth-child(7)  {width: 95px;}  /* Net Collectible*/
+.acct-table th:nth-child(8)  {width: 95px;}  /* Balance Due    */
+.acct-table th:nth-child(9)  {width: 60px;}  /* State          */
+.acct-table th:nth-child(10) {width: 90px;}  /* Invoice Date   */
 .acct-table th:nth-child(12) {width: 75px;}  /* Bonus        */
 .acct-table th:nth-child(13) {width:125px;}  /* Status       */
 .acct-row{background:var(--card);cursor:pointer;transition:all .2s;animation:fadeUp .3s ease both;}
@@ -5088,14 +5088,14 @@ function toggleAcctSort(col) {
     if (_acctSortDir === 0) _acctSortCol = '';
   } else {
     _acctSortCol = col;
-    _acctSortDir = col === 'balance' || col === 'age' || col === 'totalAmount' ? -1 : 1; // default desc for numbers, asc for text
+    _acctSortDir = col === 'balance' || col === 'age' || col === 'totalAmount' || col === 'netCollected' ? -1 : 1; // default desc for numbers, asc for text
   }
   _updateSortArrows();
   renderAccounts();
 }
 
 function _updateSortArrows() {
-  const cols = ['brand','customer','jobId','dueDate','age','totalAmount','balance','state','invoiceDate'];
+  const cols = ['brand','customer','jobId','dueDate','age','totalAmount','netCollected','balance','state','invoiceDate'];
   cols.forEach(c => {
     const el = document.getElementById('sort-arrow-' + c);
     if (!el) return;
@@ -5118,7 +5118,8 @@ function _sortAccounts(arr) {
       case 'customer':    va = (a.customer || '').toLowerCase(); vb = (b.customer || '').toLowerCase(); return dir * va.localeCompare(vb);
       case 'brand':       va = (brandMap[a.brand] || a.brand || '').toLowerCase(); vb = (brandMap[b.brand] || b.brand || '').toLowerCase(); return dir * va.localeCompare(vb);
       case 'state':       va = (a.state || '').toLowerCase(); vb = (b.state || '').toLowerCase(); return dir * va.localeCompare(vb);
-      case 'totalAmount': va = a.totalAmount || 0; vb = b.totalAmount || 0; break;
+      case 'totalAmount':    va = a.totalAmount || 0; vb = b.totalAmount || 0; break;
+      case 'netCollected':   va = a.netCollected != null ? a.netCollected : (a.totalAmount || 0); vb = b.netCollected != null ? b.netCollected : (b.totalAmount || 0); break;
       case 'jobId':       va = (a.job || a.jobId || '').toLowerCase(); vb = (b.job || b.jobId || '').toLowerCase(); return dir * va.localeCompare(vb);
       case 'dueDate':     va = a.dueDate || ''; vb = b.dueDate || ''; return dir * va.localeCompare(vb);
       case 'invoiceDate': va = a.invoiceDate || ''; vb = b.invoiceDate || ''; return dir * va.localeCompare(vb);
