@@ -1947,6 +1947,8 @@ function renderPaidSummary() {
   const partialAmt = totalPartial.reduce((s, a) => s + (a.totalPaid || 0), 0);
   const grandTotal = paidFullAmt + partialAmt;
   const rtTotal = rtAccts.reduce((s, a) => s + (a.totalPaid || a.totalAmount || 0), 0);
+  const totalAdj = paidAccts.reduce((s, a) => s + (a.totalAdjustments || 0), 0);
+  const totalNet = paidAccts.reduce((s, a) => s + (a.netCollected || a.totalAmount || 0), 0);
 
   // Group by brand (totals)
   const byBrand = {};
@@ -2018,6 +2020,16 @@ function renderPaidSummary() {
         <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Partial Payments</div>
         <div style="font-size:24px;font-weight:800;color:#9a6200;margin-top:4px">${f(partialAmt)}</div>
         <div style="font-size:12px;color:var(--muted);margin-top:2px">${totalPartial.length} invoices</div>
+      </div>
+      <div style="flex:1;min-width:180px;background:var(--white);border:1px solid rgba(133,100,4,0.2);border-radius:12px;padding:16px;box-shadow:var(--shadow)">
+        <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Adjustments / Credits</div>
+        <div style="font-size:24px;font-weight:800;color:#856404;margin-top:4px">${f(totalAdj)}</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px">contra-revenue &amp; credits</div>
+      </div>
+      <div style="flex:1;min-width:180px;background:var(--white);border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:var(--shadow)">
+        <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Net Collected</div>
+        <div style="font-size:24px;font-weight:800;color:var(--navy);margin-top:4px">${f(totalNet)}</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px">after all adjustments</div>
       </div>
       <div style="flex:1;min-width:180px;background:var(--white);border:1px solid rgba(197,0,0,0.15);border-radius:12px;padding:16px;box-shadow:var(--shadow)">
         <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Record Transfers</div>
@@ -2198,7 +2210,20 @@ function renderQPDTracker() {
       payDate: normalizeDate(acct.dateFullyPaid || acct.paymentDate || ''),
       payMethod: acct.paymentMethod || '',
       invoiceAmt: acct.totalAmount || acct.balance || 0,
+      totalAdjustments: acct.totalAdjustments || 0,
+      netCollected: acct.netCollected || acct.totalAmount || 0,
+      adjustments: acct.adjustments || [],
     };
+    // If collector didn't enter QPD amount, try to detect from AR adjustments
+    const q = qpdInvoices[invoiceId];
+    if (!q.qpdAmount && q.adjustments.length) {
+      // Sum all negative adjustments as the discount cost
+      const adjTotal = q.adjustments.reduce((s, adj) => s + (adj.amount < 0 ? Math.abs(adj.amount) : 0), 0);
+      if (adjTotal > 0) {
+        q.qpdAmount = adjTotal;
+        q.qpdPct = q.invoiceAmt > 0 ? parseFloat(((adjTotal / q.invoiceAmt) * 100).toFixed(1)) : 0;
+      }
+    }
   });
 
   const qpdList = Object.values(qpdInvoices);
@@ -2213,11 +2238,12 @@ function renderQPDTracker() {
 
   // ── Stats ──
   const totalOffered = qpdList.length;
-  const totalCollected = qpdList.filter(q => q.isPaid && !q.isRT).length;
+  const paidQPD = qpdList.filter(q => q.isPaid && !q.isRT);
+  const totalCollected = paidQPD.length;
   const convRate = totalOffered > 0 ? ((totalCollected / totalOffered) * 100).toFixed(1) : '0.0';
-  const totalInvAmt = qpdList.filter(q => q.isPaid && !q.isRT).reduce((s, q) => s + q.invoiceAmt, 0);
-  const totalDiscountCost = qpdList.filter(q => q.isPaid && !q.isRT).reduce((s, q) => s + q.qpdAmount, 0);
-  const netCollected = totalInvAmt - totalDiscountCost;
+  const totalInvAmt = paidQPD.reduce((s, q) => s + q.invoiceAmt, 0);
+  const totalDiscountCost = paidQPD.reduce((s, q) => s + q.qpdAmount, 0);
+  const totalNetCollected = paidQPD.reduce((s, q) => s + q.netCollected, 0);
   const pendingCount = qpdList.filter(q => !q.isPaid).length;
 
   // ── Brand breakdown ──
@@ -2234,6 +2260,7 @@ function renderQPDTracker() {
       convRate: items.length > 0 ? ((paid.length / items.length) * 100).toFixed(1) : '0.0',
       invoiceAmt: paid.reduce((s, q) => s + q.invoiceAmt, 0),
       discountCost: paid.reduce((s, q) => s + q.qpdAmount, 0),
+      netCollected: paid.reduce((s, q) => s + q.netCollected, 0),
       pending: items.filter(q => !q.isPaid).length,
     };
   });
@@ -2247,7 +2274,7 @@ function renderQPDTracker() {
     <div class="stat-card sc-green"><div class="stat-lbl">Collected</div><div class="stat-val sv-green">${totalCollected}</div><div class="stat-sub">${convRate}% conversion</div></div>
     <div class="stat-card sc-royal"><div class="stat-lbl">Gross Collected</div><div class="stat-val sv-royal">${fmt(totalInvAmt)}</div><div class="stat-sub">invoice face value</div></div>
     <div class="stat-card sc-purple"><div class="stat-lbl">Discount Cost</div><div class="stat-val sv-purple">${fmt(totalDiscountCost)}</div><div class="stat-sub">contra-revenue (40040)</div></div>
-    <div class="stat-card" style="border-left:4px solid var(--navy)"><div class="stat-lbl">Net Collected</div><div class="stat-val" style="color:var(--navy)">${fmt(netCollected)}</div><div class="stat-sub">${pendingCount} still pending</div></div>
+    <div class="stat-card" style="border-left:4px solid var(--navy)"><div class="stat-lbl">Net Collected</div><div class="stat-val" style="color:var(--navy)">${fmt(totalNetCollected)}</div><div class="stat-sub">${pendingCount} still pending</div></div>
   </div>`;
 
   // Brand breakdown table
@@ -2269,7 +2296,7 @@ function renderQPDTracker() {
   QUICKPAY_BRANDS.forEach(bid => {
     const b = brandStats[bid];
     if (!b) return;
-    const net = b.invoiceAmt - b.discountCost;
+    const net = b.netCollected;
     html += `<tr style="border-bottom:1px solid var(--border);font-size:13px">
       <td style="padding:10px 14px;font-weight:600">${b.name}</td>
       <td style="padding:10px 14px;text-align:center">${b.offered}</td>
@@ -2301,9 +2328,10 @@ function renderQPDTracker() {
         <th style="padding:8px 12px;text-align:left">Customer</th>
         <th style="padding:8px 12px;text-align:left">Brand</th>
         <th style="padding:8px 12px;text-align:right">Invoice Amt</th>
+        <th style="padding:8px 12px;text-align:right">Adjustments</th>
+        <th style="padding:8px 12px;text-align:right">Net Collected</th>
         <th style="padding:8px 12px;text-align:center">QPD %</th>
         <th style="padding:8px 12px;text-align:right">Discount $</th>
-        <th style="padding:8px 12px;text-align:left">QPD Date</th>
         <th style="padding:8px 12px;text-align:left">Collector</th>
         <th style="padding:8px 12px;text-align:center">Status</th>
         <th style="padding:8px 12px;text-align:left">Pay Date</th>
@@ -2318,9 +2346,10 @@ function renderQPDTracker() {
       <td style="padding:7px 12px">${q.acct.customer}</td>
       <td style="padding:7px 12px;color:var(--muted)">${q.brand}</td>
       <td style="padding:7px 12px;text-align:right;font-weight:700">${fmt(q.invoiceAmt)}</td>
+      <td style="padding:7px 12px;text-align:right;color:var(--red)">${q.totalAdjustments ? fmt(q.totalAdjustments) : '—'}</td>
+      <td style="padding:7px 12px;text-align:right;font-weight:700;color:var(--navy)">${fmt(q.netCollected)}</td>
       <td style="padding:7px 12px;text-align:center;color:#856404;font-weight:700">${q.qpdPct ? q.qpdPct + '%' : '—'}</td>
       <td style="padding:7px 12px;text-align:right;color:#856404">${q.qpdAmount ? fmt(q.qpdAmount) : '—'}</td>
-      <td style="padding:7px 12px;color:var(--muted)">${q.qpdDate || '—'}</td>
       <td style="padding:7px 12px">${q.collector}</td>
       <td style="padding:7px 12px;text-align:center;font-weight:600;color:${statusColor}">${statusLabel}</td>
       <td style="padding:7px 12px;color:var(--muted)">${q.payDate || '—'}</td>
@@ -3456,15 +3485,48 @@ function parseARText(csvText) {
         arr.sort((a, b) => b.date.localeCompare(a.date));
       });
 
+      // ── Pass 1b: Collect AR adjustments & negative AR invoices by customer+jobId ──
+      // These include: QPD discounts, insurance negotiations, sales tax adjustments,
+      // TPA fees, credits, write-offs, etc. — anything that reduces the collectible amount
+      const adjustmentsByKey = {}; // "customer|jobId" → [{type, amount, date, desc, recNum, invNum}]
+      for (let i = 1; i < rows.length; i++) {
+        const row = rows[i];
+        const obj = {};
+        header.forEach((h, idx) => { obj[h] = (row[idx] || '').toString().trim(); });
+        const recType = (obj['Record type'] || '').trim();
+        const totalAmt = parseFloat(obj['Total amount'] || 0);
+
+        // Collect: AR adjustments (any amount) and negative AR invoices (credits/negotiations)
+        const isAdj = recType === 'AR adjustment';
+        const isNegInv = recType === 'AR invoice' && totalAmt < 0;
+        if (!isAdj && !isNegInv) continue;
+
+        const cust = (obj['Customer name'] || '').trim();
+        const jobId = (obj['Reference number'] || obj['Job ID'] || obj['Document or check no.'] || '').trim();
+        if (!cust) continue;
+        const key = cust + '|' + jobId;
+        if (!adjustmentsByKey[key]) adjustmentsByKey[key] = [];
+        adjustmentsByKey[key].push({
+          type: isAdj ? 'adjustment' : 'credit',
+          amount: totalAmt,
+          date: normalizeDate(obj['Date'] || ''),
+          desc: (obj['Description'] || obj['Memo'] || obj['Summary'] || '').trim(),
+          recNum: obj['Record number'] || '',
+          invNum: obj['Invoice number'] || '',
+        });
+      }
+
       // ── Pass 2: Build account objects from AR invoice rows ──
       for (let i = 1; i < rows.length; i++) {
         const row = rows[i];
         const obj = {};
         header.forEach((h, idx) => { obj[h] = (row[idx] || '').toString().trim(); });
 
-        // Only process AR invoice rows — skip receipt, payment, and other record types
+        // Only process positive AR invoice rows — skip receipt, adjustment, and negative invoices
         const recType = obj['Record type'] || '';
+        const totalAmtCheck = parseFloat(obj['Total amount'] || 0);
         if (recType && recType !== 'AR invoice') continue;
+        if (totalAmtCheck < 0) continue; // skip negative invoices (collected in Pass 1b)
 
         // New column names (with fallback to old names for backwards compatibility)
         const totalDue  = parseFloat(obj['Total due']    || obj['Balance due'] || 0);
@@ -3549,6 +3611,23 @@ function parseARText(csvText) {
         a.paymentMethod = best.method || '';
         a.paymentDate   = best.date || a.dateFullyPaid;
         a.paymentAmount = best.amount || 0;
+      });
+
+      // ── Pass 4: Link adjustments to accounts, compute netCollected ──
+      accounts.forEach(a => {
+        a.adjustments = [];      // [{type, amount, date, desc, recNum, invNum}]
+        a.totalAdjustments = 0;  // sum of adjustment amounts (usually negative)
+        a.netCollected = 0;      // actual cash = totalAmount + adjustments (adj are negative)
+
+        const jobKey = (a.ref || a.jobId || '').trim();
+        const key = a.customer + '|' + jobKey;
+        const adjs = adjustmentsByKey[key] || [];
+        if (adjs.length) {
+          a.adjustments = adjs;
+          a.totalAdjustments = adjs.reduce((s, adj) => s + adj.amount, 0);
+        }
+        // netCollected = original amount minus what was adjusted/credited away
+        a.netCollected = a.totalAmount + a.totalAdjustments;
       });
 
       // Day-over-day reconciliation diff (only meaningful on reload, not first load)
@@ -4008,6 +4087,31 @@ function renderNotePanel(){
       <span style="font-size:12px;line-height:1.5">${a.memo}</span>
     </div>` : '');
 
+  // Adjustments panel — show AR adjustments and credit memos linked to this invoice
+  const adjPanel = (a.adjustments && a.adjustments.length) ? `
+    <div style="margin-bottom:12px;padding:10px 14px;background:rgba(133,100,4,0.05);border:1px solid rgba(133,100,4,0.2);border-radius:10px">
+      <div style="font-size:12px;font-weight:800;letter-spacing:1.5px;color:#856404;margin-bottom:8px">📄 ADJUSTMENTS &amp; CREDITS (${a.adjustments.length})</div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <tr style="color:var(--muted);font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase">
+          <th style="text-align:left;padding:3px 6px">Date</th>
+          <th style="text-align:left;padding:3px 6px">Type</th>
+          <th style="text-align:right;padding:3px 6px">Amount</th>
+          <th style="text-align:left;padding:3px 6px">Description</th>
+        </tr>
+        ${a.adjustments.map(adj => `<tr style="border-top:1px solid rgba(133,100,4,0.1)">
+          <td style="padding:4px 6px;white-space:nowrap">${adj.date}</td>
+          <td style="padding:4px 6px"><span style="font-size:10px;font-weight:700;padding:1px 6px;border-radius:8px;background:${adj.type==='adjustment'?'rgba(133,100,4,0.1);color:#856404':'rgba(0,71,159,0.1);color:var(--royal)'}">${adj.type==='adjustment'?'ADJ':'CREDIT'}</span></td>
+          <td style="padding:4px 6px;text-align:right;font-weight:700;color:${adj.amount<0?'var(--red)':'var(--green)'}">${fmtCents(adj.amount)}</td>
+          <td style="padding:4px 6px;color:var(--muted);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(adj.desc||'').replace(/"/g,'&quot;')}">${adj.desc || adj.invNum || '—'}</td>
+        </tr>`).join('')}
+        <tr style="border-top:2px solid rgba(133,100,4,0.25);font-weight:700">
+          <td colspan="2" style="padding:5px 6px;color:#856404">Net Collectible</td>
+          <td style="padding:5px 6px;text-align:right;color:var(--navy)">${fmtCents(a.netCollected)}</td>
+          <td style="padding:5px 6px;font-size:10px;color:var(--muted)">original ${fmtCents(a.totalAmount)}</td>
+        </tr>
+      </table>
+    </div>` : '';
+
   // Quick Pay Discount only applies to Paces (E9000), Archer (E12000), Semper Dry (E17000)
   const QUICKPAY_BRANDS = ['E9000', 'E12000', 'E17000'];
   const quickPayEligible = QUICKPAY_BRANDS.includes(a.brand);
@@ -4018,6 +4122,7 @@ function renderNotePanel(){
     ${(a.phone||a.email) ? `<div style="display:flex;gap:14px;flex-wrap:wrap;margin:-6px 0 12px;">${a.phone?`<a href="tel:${a.phone}" style="font-size:12px;font-weight:600;color:var(--royal);text-decoration:none">📱 ${a.phone}</a>`:''} ${a.email?`<a href="mailto:${a.email}" style="font-size:12px;font-weight:600;color:var(--royal);text-decoration:none;word-break:break-all">✉ ${a.email}</a>`:''}</div>` : ''}
     ${arCodeRow}
     ${detailGrid}
+    ${adjPanel}
     ${paidRow}
     ${partialRow}
     ${dashPanel}
