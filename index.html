@@ -1786,6 +1786,28 @@ function initPaidSummary() {
   renderPaidSummary();
 }
 
+function _exportTableToCSV(tableId, filename) {
+  const table = document.getElementById(tableId);
+  if (!table) return;
+  const rows = table.querySelectorAll('tr');
+  const csvLines = [];
+  rows.forEach(row => {
+    const cells = row.querySelectorAll('th, td');
+    const line = Array.from(cells).map(c => {
+      let txt = c.innerText.replace(/[\u25B2\u25BC]/g, '').trim(); // strip arrows
+      if (txt.includes(',') || txt.includes('"') || txt.includes('\n')) txt = '"' + txt.replace(/"/g, '""') + '"';
+      return txt;
+    });
+    csvLines.push(line.join(','));
+  });
+  const blob = new Blob([csvLines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.style.display = 'none';
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+}
+
 function renderPaidSummary() {
   const container = document.getElementById('paid-summary-content');
   if (!ACCOUNTS.length) {
@@ -1892,14 +1914,20 @@ function renderPaidSummary() {
 
     <!-- Weekly Collections by Brand (transposed: brands as rows, weeks as columns) -->
     ${sortedWeeks.length ? `<div style="background:var(--white);border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:var(--shadow)">
-      <div style="font-size:14px;font-weight:700;color:var(--navy);margin-bottom:12px">Weekly Collections by Brand</div>
-      <div style="overflow-x:auto">
-      <table style="width:100%;border-collapse:collapse;font-size:12px">
-        <tr style="background:var(--light)">
-          <th style="text-align:left;padding:6px 10px;font-size:11px;color:var(--muted);text-transform:uppercase;white-space:nowrap;position:sticky;left:0;background:var(--light);z-index:2;min-width:180px">Brand</th>
-          ${sortedWeeks.map(wk => `<th style="text-align:right;padding:6px 8px;font-size:10px;color:var(--navy);font-weight:700;white-space:nowrap">${_getWeekLabel(wk)}</th>`).join('')}
-          <th style="text-align:right;padding:6px 10px;font-size:11px;color:var(--navy);font-weight:800;white-space:nowrap">TOTAL</th>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div style="font-size:14px;font-weight:700;color:var(--navy)">Weekly Collections by Brand</div>
+        <button class="btn-sm" onclick="_exportTableToCSV('paid-weekly-tbl','weekly_collections_by_brand.csv')" style="font-size:11px;padding:4px 12px">📥 Export CSV</button>
+      </div>
+      <div style="overflow-x:auto;max-height:600px;overflow-y:auto">
+      <table id="paid-weekly-tbl" style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead>
+        <tr style="background:#0a0f33;position:sticky;top:0;z-index:3">
+          <th style="text-align:left;padding:8px 10px;font-size:11px;color:#d4890a;text-transform:uppercase;letter-spacing:1px;white-space:nowrap;position:sticky;left:0;background:#0a0f33;z-index:4;min-width:180px">Brand</th>
+          ${sortedWeeks.map(wk => `<th style="text-align:right;padding:8px 8px;font-size:11px;color:#fff;font-weight:700;white-space:nowrap">${_getWeekLabel(wk)}</th>`).join('')}
+          <th style="text-align:right;padding:8px 10px;font-size:11px;color:#d4890a;font-weight:800;white-space:nowrap;letter-spacing:1px">TOTAL</th>
         </tr>
+        </thead>
+        <tbody>
         ${sortedBrands.map((bn, bi) => {
           const rowBg = bi % 2 === 0 ? '' : 'background:#fafbfe';
           return `<tr style="${rowBg};border-bottom:1px solid var(--border)">
@@ -1911,11 +1939,12 @@ function renderPaidSummary() {
             <td style="padding:6px 10px;text-align:right;font-weight:800;color:#00479f">${f(brandTotals[bn])}</td>
           </tr>`;
         }).join('')}
-        <tr style="background:var(--light);font-weight:800">
-          <td style="padding:6px 10px;color:var(--navy);position:sticky;left:0;background:var(--light);z-index:2">WEEK TOTAL</td>
-          ${sortedWeeks.map(wk => `<td style="padding:6px 8px;text-align:right;color:#0a8a5f">${f(weekTotals[wk].total)}</td>`).join('')}
-          <td style="padding:6px 10px;text-align:right;color:#0a8a5f">${f(grandTotal)}</td>
+        <tr style="background:#0a0f33;font-weight:800">
+          <td style="padding:8px 10px;color:#d4890a;position:sticky;left:0;background:#0a0f33;z-index:2;letter-spacing:1px">WEEK TOTAL</td>
+          ${sortedWeeks.map(wk => `<td style="padding:8px 8px;text-align:right;color:#fff">${f(weekTotals[wk].total)}</td>`).join('')}
+          <td style="padding:8px 10px;text-align:right;color:#d4890a">${f(grandTotal)}</td>
         </tr>
+        </tbody>
       </table>
       </div>
       <div style="font-size:10px;color:var(--muted);margin-top:6px">Weeks run Sunday–Saturday (newest first) · Brands sorted by total collected</div>
@@ -1923,20 +1952,27 @@ function renderPaidSummary() {
 
     <!-- Invoice Detail -->
     <div style="background:var(--white);border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:var(--shadow)">
-      <div style="font-size:14px;font-weight:700;color:var(--navy);margin-bottom:12px">Invoice Detail (${paidAccts.length} records)</div>
-      ${paidAccts.length ? `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
-        <tr style="background:var(--light)">
-          <th style="text-align:left;padding:6px 8px;font-size:11px;color:var(--muted)">Invoice</th>
-          <th style="text-align:left;padding:6px 8px;font-size:11px;color:var(--muted)">Customer</th>
-          <th style="text-align:left;padding:6px 8px;font-size:11px;color:var(--muted)">Brand</th>
-          <th style="text-align:right;padding:6px 8px;font-size:11px;color:var(--muted)">Total Amt</th>
-          <th style="text-align:right;padding:6px 8px;font-size:11px;color:var(--muted)">Paid</th>
-          <th style="text-align:right;padding:6px 8px;font-size:11px;color:var(--muted)">Balance</th>
-          <th style="text-align:center;padding:6px 8px;font-size:11px;color:var(--muted)">Status</th>
-          <th style="text-align:left;padding:6px 8px;font-size:11px;color:var(--muted)">Payment Date</th>
-          <th style="text-align:left;padding:6px 8px;font-size:11px;color:var(--muted)">Method</th>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div style="font-size:14px;font-weight:700;color:var(--navy)">Invoice Detail (${paidAccts.length} records)</div>
+        ${paidAccts.length ? `<button class="btn-sm" onclick="_exportTableToCSV('paid-detail-tbl','paid_invoice_detail.csv')" style="font-size:11px;padding:4px 12px">📥 Export CSV</button>` : ''}
+      </div>
+      ${paidAccts.length ? `<div style="overflow-x:auto;max-height:600px;overflow-y:auto">
+      <table id="paid-detail-tbl" style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead>
+        <tr style="background:#0a0f33;position:sticky;top:0;z-index:3">
+          <th style="text-align:left;padding:8px 8px;font-size:11px;color:#d4890a;text-transform:uppercase;letter-spacing:1px">Invoice</th>
+          <th style="text-align:left;padding:8px 8px;font-size:11px;color:#d4890a;text-transform:uppercase;letter-spacing:1px">Customer</th>
+          <th style="text-align:left;padding:8px 8px;font-size:11px;color:#d4890a;text-transform:uppercase;letter-spacing:1px">Brand</th>
+          <th style="text-align:right;padding:8px 8px;font-size:11px;color:#d4890a;text-transform:uppercase;letter-spacing:1px">Total Amt</th>
+          <th style="text-align:right;padding:8px 8px;font-size:11px;color:#d4890a;text-transform:uppercase;letter-spacing:1px">Paid</th>
+          <th style="text-align:right;padding:8px 8px;font-size:11px;color:#d4890a;text-transform:uppercase;letter-spacing:1px">Balance</th>
+          <th style="text-align:center;padding:8px 8px;font-size:11px;color:#d4890a;text-transform:uppercase;letter-spacing:1px">Status</th>
+          <th style="text-align:left;padding:8px 8px;font-size:11px;color:#d4890a;text-transform:uppercase;letter-spacing:1px">Payment Date</th>
+          <th style="text-align:left;padding:8px 8px;font-size:11px;color:#d4890a;text-transform:uppercase;letter-spacing:1px">Method</th>
         </tr>
-        ${paidAccts.sort((a,b) => (b.paymentDate||b.dateFullyPaid||'').localeCompare(a.paymentDate||a.dateFullyPaid||'') || (b.totalPaid||0) - (a.totalPaid||0)).map(a => `<tr style="border-bottom:1px solid var(--border)">
+        </thead>
+        <tbody>
+        ${paidAccts.sort((a,b) => (b.paymentDate||b.dateFullyPaid||'').localeCompare(a.paymentDate||a.dateFullyPaid||'') || (b.totalPaid||0) - (a.totalPaid||0)).map((a, ai) => `<tr style="${ai % 2 ? 'background:#fafbfe;' : ''}border-bottom:1px solid var(--border)">
           <td style="padding:5px 8px;font-family:monospace">${a.id}</td>
           <td style="padding:5px 8px">${a.customer}</td>
           <td style="padding:5px 8px;color:var(--muted)">${brandMap[a.brand] || a.brand || '—'}</td>
@@ -1947,6 +1983,7 @@ function renderPaidSummary() {
           <td style="padding:5px 8px;color:var(--muted)">${a.paymentDate || a.dateFullyPaid || '—'}</td>
           <td style="padding:5px 8px;color:var(--muted)">${a.paymentMethod || '—'}</td>
         </tr>`).join('')}
+        </tbody>
       </table></div>` : '<div style="text-align:center;padding:30px;color:var(--muted)">No paid invoices found for the selected date range.</div>'}
     </div>
   `;
