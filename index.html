@@ -713,9 +713,7 @@ body{font-family:'Titillium Web',Arial,sans-serif;background:var(--ice);color:va
             <th class="sortable" onclick="toggleAcctSort('totalAmount')">Invoice Amt <span id="sort-arrow-totalAmount"></span></th>
             <th class="sortable" onclick="toggleAcctSort('balance')">Balance Due <span id="sort-arrow-balance"></span></th>
             <th class="sortable" onclick="toggleAcctSort('state')">State <span id="sort-arrow-state"></span></th>
-            <th>AR Code</th><th>Memo</th>
             <th class="sortable" onclick="toggleAcctSort('invoiceDate')">Invoice Date <span id="sort-arrow-invoiceDate"></span></th>
-            <th>Insurance</th>
             <th id="bonus-col-hdr" style="display:none">Bonus</th><th>Status</th>
           </tr></thead>
           <tbody id="acct-tbody"></tbody>
@@ -4090,10 +4088,7 @@ function _renderAcctRow(a, admin1, brandMap1, selId1) {
     <td style="text-align:right;font-size:13px;white-space:nowrap">${fmt(a.totalAmount || 0)}</td>
     <td style="text-align:right"><div class="bal-val">${fmt(a.balance)}</div></td>
     <td style="font-size:13px;white-space:nowrap">${a.state || '—'}</td>
-    <td style="font-size:13px;max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${_esc(a.arCode)}">${_trunc(a.arCode,25)}</td>
-    <td style="font-size:13px;max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${_esc(a.memo)}">${_trunc(a.memo,45)}</td>
     <td style="font-size:13px;white-space:nowrap">${a.invoiceDate || '—'}</td>
-    <td><span class="ins-tag">${a.insurance ? '<span class="ins-dot"></span>' + a.insurance : '—'}</span></td>
     ${admin1 ? `<td>${a._bonus ? '<span class="bonus-pill">'+a._bonus+'</span>' : '—'}</td>` : ''}
     <td><span class="rec-tag ${a._recCls}">${a._recStatus}</span></td>
   </tr>`;
@@ -4106,7 +4101,7 @@ function _renderAcctPage(filtered, page, pageSize, admin1, brandMap1, selId1) {
   const hasMore = start + pageSize < filtered.length;
   const remaining = filtered.length - start - pageSize;
   const loadMoreBtn = hasMore
-    ? `<tr id="acct-load-more"><td colspan="14" style="text-align:center;padding:12px">
+    ? `<tr id="acct-load-more"><td colspan="11" style="text-align:center;padding:12px">
         <button onclick="_loadMoreAccounts()" style="padding:8px 24px;border-radius:20px;border:1px solid var(--royal);background:rgba(0,71,159,0.06);color:var(--royal);font-weight:700;font-size:13px;cursor:pointer">
           Load More (${remaining > pageSize ? pageSize : remaining} of ${remaining} remaining)
         </button></td></tr>`
@@ -4247,6 +4242,7 @@ function renderNotePanel(){
     a.state      ? { label: 'State',        val: a.state } : null,
     a.arCode     ? { label: 'AR Code',      val: a.arCode } : null,
     a.invoiceDate? { label: 'Invoice Date', val: a.invoiceDate } : null,
+    a.insurance  ? { label: 'Insurance',    val: a.insurance } : null,
   ].filter(Boolean);
   const detailGrid = detailFields.length ? `
     <div style="margin-bottom:12px;padding:10px 14px;background:rgba(10,15,51,0.03);border:1px solid rgba(10,15,51,0.1);border-radius:10px">
