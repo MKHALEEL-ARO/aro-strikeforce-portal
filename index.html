@@ -915,6 +915,7 @@ body{font-family:'Titillium Web',Arial,sans-serif;background:var(--ice);color:va
         <select id="paid-brand-filter" style="padding:6px 12px;border-radius:8px;border:1px solid var(--border);font-size:13px;font-family:'Titillium Web',sans-serif;background:#fff;color:var(--navy)" onchange="renderPaidSummary()">
           <option value="">All Brands</option>
         </select>
+        <input type="text" id="paid-search" placeholder="Search customer…" oninput="renderPaidSummary()" style="padding:6px 12px;border-radius:8px;border:1px solid var(--border);font-size:13px;font-family:'Titillium Web',sans-serif;background:#fff;color:var(--navy);width:200px">
       </div>
     </div>
     <div id="paid-summary-content" style="display:flex;flex-direction:column;gap:16px">
@@ -1930,6 +1931,7 @@ function renderPaidSummary() {
   const fromDate = document.getElementById('paid-from').value;
   const toDate = document.getElementById('paid-to').value;
   const brandFilter = document.getElementById('paid-brand-filter').value;
+  const searchTerm = (document.getElementById('paid-search')?.value || '').trim().toLowerCase();
   const brandMap = Object.fromEntries(BRANDS.map(b => [b.id, b.name]));
 
   // Filter paid/partial accounts within date range
@@ -1937,6 +1939,7 @@ function renderPaidSummary() {
   const allPaidAccts = ACCOUNTS.filter(a => {
     if (a.payStatus !== 'paid' && a.payStatus !== 'partial') return false;
     if (brandFilter && a.brand !== brandFilter) return false;
+    if (searchTerm && !(a.customer || '').toLowerCase().includes(searchTerm)) return false;
     const dateKey = a.paymentDate || a.dateFullyPaid || a.invoiceDate || '';
     if (fromDate && dateKey < fromDate) return false;
     if (toDate && dateKey > toDate) return false;
