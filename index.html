@@ -3076,7 +3076,7 @@ async function writeNotesToFolder(dirHandle) {
     await jsonW.close();
 
     // Build daily audit CSV rows
-    const rows = ['Date,Time,Collector,Account ID,Customer,Brand,Contact Method,Who Contacted,Notes,Action,Follow-up,Claim #'];
+    const rows = ['Date,Time,Collector,Account ID,Customer,Brand,Contact Method,Who Contacted,Notes,Action,Follow-up,Claim Status,QPD %,QPD Amount,QPD Date'];
     Object.entries(notes).forEach(([acctId, noteList]) => {
       (noteList || []).forEach(n => {
         const acct = ACCOUNTS.find(a => a.id === acctId) || {};
@@ -3084,7 +3084,7 @@ async function writeNotesToFolder(dirHandle) {
         const dateStr2 = dt.toLocaleDateString() || n.date || '';
         const timeStr2 = dt.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) || '';
         const esc = v => '"' + (v||'').replace(/"/g,'""') + '"';
-        rows.push([dateStr2, timeStr2, esc(n.by||n.collector||''), esc(acctId), esc(acct.customer||''), esc(acct.brand||acct.entityName||''), esc(n.method||''), esc(n.who||''), esc(n.notes||''), esc(n.action||''), esc(n.followup||''), esc(n.claim||'')].join(','));
+        rows.push([dateStr2, timeStr2, esc(n.by||n.collector||''), esc(acctId), esc(acct.customer||''), esc(acct.brand||acct.entityName||''), esc(n.method||''), esc(n.who||''), esc(n.notes||''), esc(n.action||''), esc(n.followup||''), esc(n.claim||''), n.qpdPct||'', n.qpdAmount||'', esc(n.qpdDate||'')].join(','));
       });
     });
     const csvName = 'audit_' + today + '.csv';
@@ -3748,8 +3748,15 @@ function renderNotePanel(){
         • Applies to <strong>Paces, Archer &amp; Semper Dry</strong> only<br>
         • Hits account <strong>40040</strong> (contra-revenue), <em>not</em> bad debt (55000)<br>
         • Does <em>not</em> reduce insurance deductible<br>
-        • Dr. 40040 / Cr. 11000 (A/R) — Regional Controller approval required<br>
-        • Document discount % and effective date in your note
+        • Dr. 40040 / Cr. 11000 (A/R) — Regional Controller approval required
+      </div>
+      <div id="quickpay-fields" style="display:none;margin-top:8px;padding:12px 14px;background:#fffdf0;border:1px solid rgba(249,168,37,0.35);border-radius:8px">
+        <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#856404;margin-bottom:8px">Quick Pay Discount Details</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;align-items:end">
+          <div class="frow" style="margin-bottom:0"><label class="flbl" style="color:#856404">Discount %</label><input type="number" class="finput" id="f-qpd-pct" placeholder="e.g. 5" min="0" max="100" step="0.5" style="border-color:rgba(249,168,37,0.5)" /></div>
+          <div class="frow" style="margin-bottom:0"><label class="flbl" style="color:#856404">Discount Amount ($)</label><input type="number" class="finput" id="f-qpd-amount" placeholder="0.00" min="0" step="0.01" style="border-color:rgba(249,168,37,0.5)" /></div>
+          <div class="frow" style="margin-bottom:0"><label class="flbl" style="color:#856404">Effective Date</label><input type="date" class="finput" id="f-qpd-date" style="border-color:rgba(249,168,37,0.5)" /></div>
+        </div>
       </div>` : ''}
     </div>
     <div class="committed-row">
@@ -3781,6 +3788,7 @@ function renderNotePanel(){
           <div class="ne-method">${n.method}${n.claim?` · <span style="font-size:12px;font-weight:700;padding:1px 7px;border-radius:10px;background:${n.claim==='Quick Pay Discount'?'#fff3cd;color:#856404':n.claim==='Collected – Full'?'rgba(10,138,95,0.12);color:var(--green)':'rgba(10,15,51,0.07);color:var(--muted)'}">${n.claim}</span>`:''}</div>
           <div class="ne-text">${n.notes||'(no notes)'}</div>
           ${n.committedAmount>0?`<div style="margin-top:5px;font-size:12px;font-weight:700;color:var(--royal);background:rgba(0,71,159,0.07);padding:3px 8px;border-radius:6px;display:inline-block">💰 Committed: ${fmtCents(n.committedAmount)}${n.committedDate?' by '+n.committedDate:''}</div>`:''}
+          ${n.qpdAmount>0?`<div style="margin-top:5px;font-size:12px;font-weight:700;color:#856404;background:#fff3cd;padding:3px 8px;border-radius:6px;display:inline-block">📄 Quick Pay Discount: ${fmtCents(n.qpdAmount)}${n.qpdPct?' ('+n.qpdPct+'%)':''}${n.qpdDate?' eff. '+n.qpdDate:''}</div>`:''}
           ${n.litigation?`<div style="margin-top:5px;font-size:12px;font-weight:800;color:#b43c00;background:rgba(180,60,0,0.08);padding:2px 8px;border-radius:6px;display:inline-block">⚖ IN LITIGATION</div>`:''}
           ${n.action?`<div class="ne-action">→ ${n.action}</div>`:''}
         </div>`;
@@ -3789,8 +3797,23 @@ function renderNotePanel(){
 }
 
 function onClaimStatusChange(sel) {
+  const isQPD = sel.value === 'Quick Pay Discount';
   const notice = document.getElementById('quickpay-notice');
-  if (notice) notice.style.display = sel.value === 'Quick Pay Discount' ? 'block' : 'none';
+  const fields = document.getElementById('quickpay-fields');
+  if (notice) notice.style.display = isQPD ? 'block' : 'none';
+  if (fields) fields.style.display = isQPD ? 'block' : 'none';
+  // Auto-calculate discount amount when % changes
+  if (isQPD && selectedAccount) {
+    const pctInput = document.getElementById('f-qpd-pct');
+    const amtInput = document.getElementById('f-qpd-amount');
+    if (pctInput && amtInput) {
+      pctInput.oninput = function() {
+        const pct = parseFloat(this.value) || 0;
+        const bal = selectedAccount.balance || selectedAccount.totalAmount || 0;
+        amtInput.value = (bal * pct / 100).toFixed(2);
+      };
+    }
+  }
 }
 
 function submitNote(){
@@ -3810,6 +3833,9 @@ function submitNote(){
     claim:document.getElementById('f-claim')?.value||'',
     committedAmount: parseFloat(document.getElementById('f-committed-amount')?.value) || 0,
     committedDate:  document.getElementById('f-committed-date')?.value || '',
+    qpdPct:         parseFloat(document.getElementById('f-qpd-pct')?.value)    || 0,
+    qpdAmount:      parseFloat(document.getElementById('f-qpd-amount')?.value) || 0,
+    qpdDate:        document.getElementById('f-qpd-date')?.value || '',
     litigation:     document.getElementById('f-litigation')?.checked  || false,
     needsWriteOff:  document.getElementById('f-writeoff')?.checked    || false,
     ts:new Date().toISOString(),
