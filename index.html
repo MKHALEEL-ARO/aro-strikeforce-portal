@@ -1238,7 +1238,7 @@ function renderUI(){
     {id:'page-summary',    label:'📈 Brand Summary',  adminOnly:false},
     {id:'page-leaderboard',label:'🏆 Leaderboard',    adminOnly:true},
     {id:'page-paid',       label:'💰 Paid Summary',    adminOnly:true},
-    {id:'page-qpd',        label:'📄 QPD Tracker',     adminOnly:true},
+    {id:'page-qpd',        label:'📄 QPD Tracker',     adminOnly:true, allowedUsers:['Adriana Chavez']},
     {id:'page-briefing',   label:'📧 Briefing',       adminOnly:true, briefingOnly:true},
     {id:'page-writeoff',   label:'⚠ Write-Offs',      adminOnly:true},
     {id:'page-bonus',      label:'💰 Bonus Config',    adminOnly:true},
@@ -1246,7 +1246,7 @@ function renderUI(){
   ];
 
   document.getElementById('nav-tabs').innerHTML = tabs
-    .filter(t => (!t.adminOnly || isA) && (!t.briefingOnly || isBriefingUser))
+    .filter(t => (!t.adminOnly || isA || (t.allowedUsers && currentUser && t.allowedUsers.includes(currentUser.name))) && (!t.briefingOnly || isBriefingUser))
     .map(t => `<div class="nav-tab ${t.id === 'page-accounts' ? 'active' : ''} ${t.adminOnly ? 'admin-only' : ''}" onclick="switchPage('${t.id}')">${t.label}</div>`)
     .join('');
 
