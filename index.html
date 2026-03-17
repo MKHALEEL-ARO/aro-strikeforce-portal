@@ -3881,13 +3881,20 @@ function parseARText(csvText) {
         // netCollected = original amount minus what was adjusted/credited away
         a.netCollected = a.totalAmount + a.totalAdjustments;
 
-        // Fallback: if the ambiguity guard blocked adjustment linking (multiple invoices
-        // sharing the same ref or job), totalAdjustments stays 0 and netCollected would
-        // equal the full invoice amount — which is wrong when the customer paid less.
-        // Sage's own 'Total paid' column is direct ground truth for cash received, so
-        // use it as a floor whenever it's non-zero and less than the invoice amount.
-        if (a.totalAdjustments === 0 && a.totalPaid > 0 && a.totalPaid < a.totalAmount) {
-          a.netCollected = a.totalPaid;
+        // Fallback for fully-paid invoices where adjustment linking was blocked:
+        // Sage's 'Total paid' can equal 'Total amount' when Record Transfers cover
+        // the remaining balance (making totalPaid an unreliable floor).
+        // Pass 3 sets paymentAmount from the actual AR receipt row — this is the
+        // real cash received. Use it when no adjustments were linked and it's less
+        // than the invoice amount.
+        if (a.totalAdjustments === 0 && a.payStatus === 'paid') {
+          if (a.paymentAmount > 0 && a.paymentAmount < a.totalAmount) {
+            // paymentAmount is the actual receipt (e.g. $58,550 EFT)
+            a.netCollected = a.paymentAmount;
+          } else if (a.totalPaid > 0 && a.totalPaid < a.totalAmount) {
+            // secondary fallback: Sage's Total paid field
+            a.netCollected = a.totalPaid;
+          }
         }
       });
 
@@ -3904,28 +3911,6 @@ function parseARText(csvText) {
       DataLayer.setAR(accounts);
       ACCOUNTS = accounts;
 
-      // ── DEBUG: log parsed data for any invoice matching known problem IDs ──
-      const _debugIds = ['596091'];
-      _debugIds.forEach(debugId => {
-        const _da = accounts.find(a => a.id === debugId);
-        if (_da) {
-          console.group(`[ARO DEBUG] Invoice ${debugId} — ${_da.customer}`);
-          console.log('totalAmount:',    _da.totalAmount);
-          console.log('totalPaid:',      _da.totalPaid);
-          console.log('balance:',        _da.balance);
-          console.log('payStatus:',      _da.payStatus);
-          console.log('totalAdjustments:', _da.totalAdjustments);
-          console.log('netCollected:',   _da.netCollected);
-          console.log('paymentMethod:',  _da.paymentMethod);
-          console.log('paymentAmount:',  _da.paymentAmount);
-          console.log('paymentDate:',    _da.paymentDate);
-          console.log('ref:',            _da.ref);
-          console.log('jobId:',          _da.jobId);
-          console.log('inv:',            _da.inv);
-          console.log('adjustments:',    _da.adjustments);
-          console.groupEnd();
-        }
-      });
       document.getElementById('csv-import-banner').style.display = 'none';
       document.getElementById('csv-reload-link').style.display = 'flex';
       document.getElementById('dash-import-bar').style.display = 'flex';
