@@ -1760,7 +1760,9 @@ async function checkAndShowBriefing() {
   } catch(e) { /* 404 = not generated yet */ }
 
   try {
-    const briefingHtml = generateDailyBriefing(today);
+    // Load aging history, generate briefing with trend data
+    const agingHistory = await loadAgingHistory();
+    const briefingHtml = generateDailyBriefing(today, agingHistory);
     // Save briefing to blob for persistence + history
     await blobUpload(flagFile, JSON.stringify({
       generatedAt: new Date().toISOString(),
@@ -1772,6 +1774,8 @@ async function checkAndShowBriefing() {
     const snapshot = {};
     ACCOUNTS.forEach(a => { snapshot[a.id] = { balance: a.balance, payStatus: a.payStatus }; });
     await blobUpload('briefing_snapshot.json', JSON.stringify({ date: today, accounts: snapshot }));
+    // Save today's aging buckets to history (will be computed fresh inside generate)
+    await _saveCurrentAgingToHistory(today);
     showToast('📧 Today\'s briefing is ready — check the Briefing tab');
   } catch(e) {
     console.warn('Daily briefing generation failed:', e);
@@ -1825,7 +1829,8 @@ async function loadBriefingForDate(dateStr) {
   // Not in blob — if it's today, generate live
   const today = new Date().toISOString().slice(0, 10);
   if (dateStr === today && ACCOUNTS.length) {
-    const html = generateDailyBriefing(today);
+    const agingHistory = await loadAgingHistory();
+    const html = generateDailyBriefing(today, agingHistory);
     container.innerHTML = html;
   } else {
     container.innerHTML = '<div style="text-align:center;padding:60px;color:var(--muted)"><div style="font-size:36px;margin-bottom:12px">📭</div><p>No briefing found for ' + dateStr + '.</p><p style="font-size:12px;margin-top:8px">Briefings are generated when an admin logs in each day.</p></div>';
@@ -1837,7 +1842,8 @@ async function generateAndShowBriefing() {
   container.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted)">Generating briefing…</div>';
   try {
     const today = new Date().toISOString().slice(0, 10);
-    const html = generateDailyBriefing(today);
+    const agingHistory = await loadAgingHistory();
+    const html = generateDailyBriefing(today, agingHistory);
     container.innerHTML = html;
     // Save to blob
     if (BLOB_SAS_URL) {
@@ -1851,6 +1857,8 @@ async function generateAndShowBriefing() {
       const snapshot = {};
       ACCOUNTS.forEach(a => { snapshot[a.id] = { balance: a.balance, payStatus: a.payStatus }; });
       await blobUpload('briefing_snapshot.json', JSON.stringify({ date: today, accounts: snapshot }));
+      // Save today's aging data to history
+      await _saveCurrentAgingToHistory(today);
     }
     showToast('📧 Briefing generated and saved');
     // Refresh date picker
@@ -1863,7 +1871,7 @@ async function generateAndShowBriefing() {
   }
 }
 
-function generateDailyBriefing(today) {
+function generateDailyBriefing(today, agingHistory) {
   const yesterday = _getPriorBusinessDay(today);
   const brandMap  = Object.fromEntries(BRANDS.map(b => [b.id, b.name]));
   const now       = Date.now();
@@ -1979,6 +1987,23 @@ function generateDailyBriefing(today) {
     localStorage.setItem('aro_briefing_prior_snapshot', JSON.stringify(snap));
   } catch(e) {}
 
+  // ── Build aging trend table data ──
+  // Merge today's data into the history for display
+  const historyForDisplay = Array.isArray(agingHistory) ? [...agingHistory] : [];
+  // Replace or add today's entry
+  const todayIdx = historyForDisplay.findIndex(h => h.date === today);
+  const todayEntry = {
+    date: today,
+    totalOpen: totalOpen,
+    totalOpenAmt: totalOpenAmt,
+    buckets: agingData.map(d => ({ count: d.count, amount: d.amount }))
+  };
+  if (todayIdx >= 0) historyForDisplay[todayIdx] = todayEntry;
+  else historyForDisplay.push(todayEntry);
+  // Sort descending by date (most recent first), limit to 30 days for display
+  historyForDisplay.sort((a, b) => b.date.localeCompare(a.date));
+  const trendData = historyForDisplay.slice(0, 30);
+
   // ── BUILD HTML ──
   const fmtD = n => _fmtUSD.format(n);
   const collectorRows = Object.entries(collectorActivity)
@@ -2046,6 +2071,39 @@ function generateDailyBriefing(today) {
     </table>
   </div>
 
+  <!-- Aging Bucket Trend -->
+  ${trendData.length > 1 ? `<div style="padding:20px 24px;border-bottom:1px solid #e8ecf3">
+    <div style="font-size:14px;font-weight:700;color:#0a0f33;margin-bottom:12px">AGING BUCKET TREND</div>
+    <div style="overflow-x:auto">
+    <table style="width:100%;border-collapse:collapse;border:1px solid #e8ecf3;border-radius:8px;overflow:hidden;font-size:12px">
+      <tr style="background:#f0f5fc">
+        <th style="padding:6px 8px;text-align:left;font-size:11px;color:#0a0f33;white-space:nowrap;position:sticky;left:0;background:#f0f5fc">Date</th>
+        ${buckets.map((b, i) => `<th style="padding:6px 8px;text-align:center;font-size:11px;color:${bktColors[i]};font-weight:700">${b.label}</th>`).join('')}
+        <th style="padding:6px 8px;text-align:center;font-size:11px;color:#00479f;font-weight:700">Total Open</th>
+      </tr>
+      ${trendData.map((row, ri) => {
+        const prevRow = trendData[ri + 1]; // next in array = previous day
+        const rowBg = ri === 0 ? 'background:rgba(0,71,159,0.04)' : (ri % 2 === 0 ? '' : 'background:#fafbfe');
+        const isToday = row.date === today;
+        return `<tr style="${rowBg};border-bottom:1px solid #e8ecf3">
+          <td style="padding:5px 8px;font-weight:${isToday ? '700' : '500'};color:${isToday ? '#00479f' : '#0a0f33'};white-space:nowrap;font-size:12px;position:sticky;left:0;${rowBg}">${row.date}${isToday ? ' ●' : ''}</td>
+          ${row.buckets.map((b, bi) => {
+            const prev = prevRow && prevRow.buckets[bi] ? prevRow.buckets[bi].amount : null;
+            const diff = prev !== null ? b.amount - prev : null;
+            const arrow = diff === null ? '' : diff > 0 ? ' <span style="color:#c50000;font-size:10px">▲' + fmtD(Math.abs(diff)) + '</span>' : diff < 0 ? ' <span style="color:#0a8a5f;font-size:10px">▼' + fmtD(Math.abs(diff)) + '</span>' : '';
+            return `<td style="padding:5px 8px;text-align:center"><div style="font-weight:600;color:${bktColors[bi]}">${fmtD(b.amount)}</div><div style="font-size:10px;color:#4a5a7a">${b.count} inv${arrow}</div></td>`;
+          }).join('')}
+          <td style="padding:5px 8px;text-align:center">
+            <div style="font-weight:700;color:#00479f">${fmtD(row.totalOpenAmt)}</div>
+            <div style="font-size:10px;color:#4a5a7a">${row.totalOpen} inv${prevRow ? (row.totalOpenAmt - prevRow.totalOpenAmt > 0 ? ' <span style="color:#c50000">▲' + fmtD(Math.abs(row.totalOpenAmt - prevRow.totalOpenAmt)) + '</span>' : row.totalOpenAmt - prevRow.totalOpenAmt < 0 ? ' <span style="color:#0a8a5f">▼' + fmtD(Math.abs(row.totalOpenAmt - prevRow.totalOpenAmt)) + '</span>' : '') : ''}</div>
+          </td>
+        </tr>`;
+      }).join('')}
+    </table>
+    </div>
+    <div style="font-size:10px;color:#8899bb;margin-top:6px">▲ = increased from prior day &nbsp;·&nbsp; ▼ = decreased from prior day &nbsp;·&nbsp; Showing up to 30 days</div>
+  </div>` : ''}
+
   <!-- Collector Activity Summary -->
   <div style="padding:20px 24px;border-bottom:1px solid #e8ecf3">
     <div style="font-size:14px;font-weight:700;color:#0a0f33;margin-bottom:10px">COLLECTOR ACTIVITY — ${yesterday}</div>
@@ -2087,6 +2145,65 @@ function _getPriorBusinessDay(todayStr) {
   const sub = dow === 1 ? 3 : dow === 0 ? 2 : 1;
   d.setDate(d.getDate() - sub);
   return d.toISOString().slice(0, 10);
+}
+
+// ── Aging History Helpers ──
+// Stores daily aging bucket snapshots in blob as aging_history.json
+// Format: [ { date, totalOpen, totalOpenAmt, buckets: [{count, amount}, ...] }, ... ]
+
+async function loadAgingHistory() {
+  try {
+    const raw = await blobFetch('aging_history.json');
+    return JSON.parse(raw);
+  } catch(e) { return []; }
+}
+
+async function saveAgingHistory(today, agingData, totalOpen, totalOpenAmt) {
+  try {
+    let history = await loadAgingHistory();
+    // Remove existing entry for today (will be replaced)
+    history = history.filter(h => h.date !== today);
+    // Add today's data
+    history.push({
+      date: today,
+      totalOpen: totalOpen,
+      totalOpenAmt: totalOpenAmt,
+      buckets: agingData.map(d => ({ count: d.count, amount: d.amount }))
+    });
+    // Sort by date descending and keep last 90 days
+    history.sort((a, b) => b.date.localeCompare(a.date));
+    if (history.length > 90) history = history.slice(0, 90);
+    await blobUpload('aging_history.json', JSON.stringify(history));
+    return history;
+  } catch(e) {
+    console.warn('Failed to save aging history:', e);
+    return [];
+  }
+}
+
+// Computes current aging buckets from ACCOUNTS and saves to history
+async function _saveCurrentAgingToHistory(today) {
+  const agingBuckets = [
+    { min: 1, max: 30 }, { min: 31, max: 60 }, { min: 61, max: 90 },
+    { min: 91, max: 120 }, { min: 121, max: 180 }, { min: 181, max: 365 },
+    { min: 366, max: 999999 }
+  ];
+  const agingData = agingBuckets.map(() => ({ count: 0, amount: 0 }));
+  let totalOpen = 0, totalOpenAmt = 0;
+  const now = Date.now();
+  ACCOUNTS.forEach(a => {
+    if (a.payStatus === 'paid') return;
+    const d = a._days !== undefined ? a._days : Math.floor((now - new Date(a.dueDate)) / 86400000);
+    if (d <= 0) return;
+    totalOpen++; totalOpenAmt += a.balance;
+    for (let i = 0; i < agingBuckets.length; i++) {
+      if (d >= agingBuckets[i].min && d <= agingBuckets[i].max) {
+        agingData[i].count++; agingData[i].amount += a.balance;
+        break;
+      }
+    }
+  });
+  await saveAgingHistory(today, agingData, totalOpen, totalOpenAmt);
 }
 
 // ── Daily cache helpers — AR + DASH only fetched from blob once per day ──
