@@ -321,17 +321,16 @@ body{font-family:'Titillium Web',Arial,sans-serif;background:var(--ice);color:va
   transform:scaleX(2);
 }
 /* Column widths */
-.acct-table th:nth-child(1)  {width:140px;}  /* Brand        */
-.acct-table th:nth-child(2)  {width:210px;}  /* Customer     */
-.acct-table th:nth-child(3)  {width:105px;}  /* Due Date     */
-.acct-table th:nth-child(4)  {width: 85px;}  /* Age          */
-.acct-table th:nth-child(5)  {width:115px;}  /* Balance Due  */
-.acct-table th:nth-child(6)  {width: 80px;}  /* State        */
-.acct-table th:nth-child(7)  {width:155px;}  /* Job Status   */
-.acct-table th:nth-child(8)  {width:155px;}  /* AR Code      */
-.acct-table th:nth-child(9)  {width:190px;}  /* Memo         */
-.acct-table th:nth-child(10) {width:105px;}  /* Invoice Date */
-.acct-table th:nth-child(11) {width:150px;}  /* Insurance    */
+.acct-table th:nth-child(1)  {width:140px;}  /* Brand          */
+.acct-table th:nth-child(2)  {width:210px;}  /* Customer       */
+.acct-table th:nth-child(3)  {width: 90px;}  /* Job ID         */
+.acct-table th:nth-child(4)  {width: 90px;}  /* Due Date       */
+.acct-table th:nth-child(5)  {width: 75px;}  /* Age            */
+.acct-table th:nth-child(6)  {width:105px;}  /* Invoice Amt    */
+.acct-table th:nth-child(7)  {width:115px;}  /* Net Collectible*/
+.acct-table th:nth-child(8)  {width:115px;}  /* Balance Due    */
+.acct-table th:nth-child(9)  {width: 70px;}  /* State          */
+.acct-table th:nth-child(10) {width: 95px;}  /* Invoice Date   */
 .acct-table th:nth-child(12) {width: 75px;}  /* Bonus        */
 .acct-table th:nth-child(13) {width:125px;}  /* Status       */
 .acct-row{background:var(--card);cursor:pointer;transition:all .2s;animation:fadeUp .3s ease both;}
@@ -711,6 +710,7 @@ body{font-family:'Titillium Web',Arial,sans-serif;background:var(--ice);color:va
             <th class="sortable" onclick="toggleAcctSort('dueDate')">Due Date <span id="sort-arrow-dueDate"></span></th>
             <th class="sortable" onclick="toggleAcctSort('age')">Age <span id="sort-arrow-age"></span></th>
             <th class="sortable" onclick="toggleAcctSort('totalAmount')">Invoice Amt <span id="sort-arrow-totalAmount"></span></th>
+            <th class="sortable" onclick="toggleAcctSort('netCollected')">Net Collectible <span id="sort-arrow-netCollected"></span></th>
             <th class="sortable" onclick="toggleAcctSort('balance')">Balance Due <span id="sort-arrow-balance"></span></th>
             <th class="sortable" onclick="toggleAcctSort('state')">State <span id="sort-arrow-state"></span></th>
             <th class="sortable" onclick="toggleAcctSort('invoiceDate')">Invoice Date <span id="sort-arrow-invoiceDate"></span></th>
@@ -4151,6 +4151,7 @@ function _renderAcctRow(a, admin1, brandMap1, selId1) {
     <td style="font-size:13px;white-space:nowrap">${a.dueDate || '—'}</td>
     <td><span class="age-badge ${a._ageCls}">${a._ageLbl}</span></td>
     <td style="text-align:right;font-size:13px;white-space:nowrap">${fmt(a.totalAmount || 0)}</td>
+    <td style="text-align:right;font-size:13px;white-space:nowrap;color:${(a.netCollected||0) < 0 ? 'var(--red)' : 'inherit'}">${fmt(a.netCollected || a.totalAmount || 0)}</td>
     <td style="text-align:right"><div class="bal-val">${fmt(a.balance)}</div></td>
     <td style="font-size:13px;white-space:nowrap">${a.state || '—'}</td>
     <td style="font-size:13px;white-space:nowrap">${a.invoiceDate || '—'}</td>
