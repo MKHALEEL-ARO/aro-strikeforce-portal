@@ -777,17 +777,17 @@ body{font-family:'Titillium Web',Arial,sans-serif;background:var(--ice);color:va
     <div class="bonus-config-grid">
       <div class="bonus-config-card">
         <div class="bc-label">Standard Bonus</div>
-        <div class="bc-desc">Invoices cleared between 61–90 days past due</div>
+        <div class="bc-desc">Invoices 61–90 days past due (under mega threshold)</div>
         <div class="bc-input-wrap"><span class="bc-dollar">$</span><input class="bc-input" id="bc-25" type="number" value="25" min="0" /></div>
       </div>
       <div class="bonus-config-card">
         <div class="bc-label">Priority Bonus</div>
-        <div class="bc-desc">Invoices cleared 90+ days past due</div>
+        <div class="bc-desc">Invoices 91+ days past due (under mega threshold)</div>
         <div class="bc-input-wrap"><span class="bc-dollar">$</span><input class="bc-input" id="bc-50" type="number" value="50" min="0" /></div>
       </div>
       <div class="bonus-config-card">
         <div class="bc-label">Mega Bonus</div>
-        <div class="bc-desc">Single invoice > $25K cleared at 60+ days</div>
+        <div class="bc-desc">Invoice exceeds threshold &amp; 60+ days — overrides Standard/Priority</div>
         <div class="bc-input-wrap"><span class="bc-dollar">$</span><input class="bc-input" id="bc-250" type="number" value="250" min="0" /></div>
       </div>
     </div>
