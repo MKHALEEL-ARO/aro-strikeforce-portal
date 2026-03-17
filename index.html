@@ -519,6 +519,11 @@ body{font-family:'Titillium Web',Arial,sans-serif;background:var(--ice);color:va
 .toast-err{background:var(--red);color:#fff;box-shadow:0 6px 24px rgba(204,34,51,0.35);}
 
 @keyframes fadeUp{from{opacity:0;transform:translateY(14px);}to{opacity:1;transform:translateY(0);}}
+
+/* Briefing tab: override email-width constraint for portal display */
+#page-briefing #briefing-content > div,
+#page-briefing #briefing-content .briefing-wrap { max-width:100% !important; box-shadow:none !important; border-radius:0 !important; }
+#page-briefing #briefing-content table { width:100% !important; }
 </style>
 </head>
 <body>
@@ -2597,17 +2602,17 @@ function generateDailyBriefing(today, agingHistory) {
   </tr>`).join('');
 
   return `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="font-family:Segoe UI,Arial,sans-serif;background:#f0f5fc;margin:0;padding:20px">
-<div style="max-width:800px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 16px rgba(10,15,51,0.1)">
+<div class="briefing-wrap" style="max-width:800px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 16px rgba(10,15,51,0.1)">
 
   <!-- Header -->
-  <div style="background:#0a0f33;color:#fff;padding:20px 24px">
-    <div style="font-size:20px;font-weight:800;letter-spacing:2px">ARO STRIKE FORCE</div>
-    <div style="font-size:12px;color:#d4890a;letter-spacing:3px;margin-top:2px">DAILY COLLECTIONS BRIEFING</div>
-    <div style="font-size:13px;color:#8899bb;margin-top:8px">${today} &nbsp;|&nbsp; Activity from ${yesterday}</div>
+  <div style="background:linear-gradient(135deg,#0a0f33 0%,#1a2550 100%);color:#fff;padding:28px 32px">
+    <div style="font-size:22px;font-weight:800;letter-spacing:2.5px">ARO STRIKE FORCE</div>
+    <div style="font-size:12px;color:#d4890a;letter-spacing:3px;margin-top:4px;font-weight:700">DAILY COLLECTIONS BRIEFING</div>
+    <div style="font-size:13px;color:#8899bb;margin-top:10px">${today} &nbsp;|&nbsp; Activity from ${yesterday}</div>
   </div>
 
   <!-- Aging Snapshot -->
-  <div style="padding:20px 24px;border-bottom:1px solid #e8ecf3">
+  <div style="padding:24px 32px;border-bottom:1px solid #e8ecf3">
     <div style="font-size:14px;font-weight:700;color:#0a0f33;margin-bottom:12px">AR AGING SNAPSHOT</div>
     <div style="display:flex;gap:8px;margin-bottom:12px">
       <div style="flex:1;background:rgba(0,71,159,0.06);border:1px solid rgba(0,71,159,0.15);border-radius:8px;padding:10px;text-align:center">
@@ -2628,7 +2633,7 @@ function generateDailyBriefing(today, agingHistory) {
   </div>
 
   <!-- Aging Bucket Trend -->
-  ${trendData.length > 1 ? `<div style="padding:20px 24px;border-bottom:1px solid #e8ecf3">
+  ${trendData.length > 1 ? `<div style="padding:24px 32px;border-bottom:1px solid #e8ecf3">
     <div style="font-size:14px;font-weight:700;color:#0a0f33;margin-bottom:12px">AGING BUCKET TREND</div>
     <div style="overflow-x:auto">
     <table style="width:100%;border-collapse:collapse;border:1px solid #e8ecf3;border-radius:8px;overflow:hidden;font-size:12px">
@@ -2661,7 +2666,7 @@ function generateDailyBriefing(today, agingHistory) {
   </div>` : ''}
 
   <!-- Payments Received -->
-  ${paymentsReceived.length ? `<div style="padding:20px 24px;border-bottom:1px solid #e8ecf3">
+  ${paymentsReceived.length ? `<div style="padding:24px 32px;border-bottom:1px solid #e8ecf3">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <div style="font-size:14px;font-weight:700;color:#0a0f33">💰 PAYMENTS RECEIVED</div>
       <div style="background:rgba(10,138,95,0.08);border:1px solid rgba(10,138,95,0.2);border-radius:8px;padding:6px 14px;text-align:center">
@@ -2691,25 +2696,25 @@ function generateDailyBriefing(today, agingHistory) {
         <td style="padding:5px 8px;color:#4a5a7a;font-size:11px">${p.paymentMethod || '—'}</td>
       </tr>`).join('')}
     </table>
-  </div>` : `<div style="padding:20px 24px;border-bottom:1px solid #e8ecf3">
+  </div>` : `<div style="padding:24px 32px;border-bottom:1px solid #e8ecf3">
     <div style="font-size:14px;font-weight:700;color:#0a0f33;margin-bottom:8px">💰 PAYMENTS RECEIVED</div>
     <div style="color:#4a5a7a;font-size:13px">No payment status changes detected since the last snapshot.</div>
   </div>`}
 
   <!-- Collector Activity Summary -->
-  <div style="padding:20px 24px;border-bottom:1px solid #e8ecf3">
+  <div style="padding:24px 32px;border-bottom:1px solid #e8ecf3">
     <div style="font-size:14px;font-weight:700;color:#0a0f33;margin-bottom:10px">COLLECTOR ACTIVITY — ${yesterday}</div>
     ${collectorRows ? `<table style="width:100%;border-collapse:collapse"><tr style="background:#f0f5fc"><th style="text-align:left;padding:6px 10px;font-size:11px;color:#4a5a7a">Collector</th><th style="text-align:center;padding:6px 10px;font-size:11px;color:#4a5a7a">Notes</th><th style="text-align:right;padding:6px 10px;font-size:11px;color:#4a5a7a">Balance Touched</th><th style="text-align:right;padding:6px 10px;font-size:11px;color:#4a5a7a">Committed</th></tr>${collectorRows}</table>` : '<div style="color:#4a5a7a;font-size:13px">No collector activity recorded yesterday.</div>'}
   </div>
 
   <!-- Audit Trail -->
-  <div style="padding:20px 24px;border-bottom:1px solid #e8ecf3">
+  <div style="padding:24px 32px;border-bottom:1px solid #e8ecf3">
     <div style="font-size:14px;font-weight:700;color:#0a0f33;margin-bottom:10px">ACTIVITY AUDIT TRAIL — ${yesterday}</div>
     ${activityRows ? `<table style="width:100%;border-collapse:collapse;font-size:12px"><tr style="background:#f0f5fc"><th style="text-align:left;padding:5px 8px;font-size:11px;color:#4a5a7a">Invoice</th><th style="text-align:left;padding:5px 8px;font-size:11px;color:#4a5a7a">Customer</th><th style="text-align:right;padding:5px 8px;font-size:11px;color:#4a5a7a">Balance</th><th style="text-align:left;padding:5px 8px;font-size:11px;color:#4a5a7a">Collector</th><th style="text-align:left;padding:5px 8px;font-size:11px;color:#4a5a7a">Method</th><th style="text-align:left;padding:5px 8px;font-size:11px;color:#4a5a7a">Notes</th><th style="text-align:right;padding:5px 8px;font-size:11px;color:#4a5a7a">Committed</th></tr>${activityRows}</table>` : '<div style="color:#4a5a7a;font-size:13px">No notes logged yesterday.</div>'}
   </div>
 
   <!-- Status Changes -->
-  ${statusChanges.length || newWriteoffs.length || newLitigation.length ? `<div style="padding:20px 24px;border-bottom:1px solid #e8ecf3">
+  ${statusChanges.length || newWriteoffs.length || newLitigation.length ? `<div style="padding:24px 32px;border-bottom:1px solid #e8ecf3">
     <div style="font-size:14px;font-weight:700;color:#0a0f33;margin-bottom:10px">STATUS CHANGES</div>
     ${statusRows ? `<table style="width:100%;border-collapse:collapse"><tr style="background:#f0f5fc"><th style="text-align:left;padding:5px 8px;font-size:11px;color:#4a5a7a">Invoice</th><th style="text-align:left;padding:5px 8px;font-size:11px;color:#4a5a7a">Customer</th><th style="text-align:left;padding:5px 8px;font-size:11px;color:#4a5a7a">Brand</th><th style="text-align:right;padding:5px 8px;font-size:11px;color:#4a5a7a">Balance</th><th style="text-align:left;padding:5px 8px;font-size:11px;color:#4a5a7a">From</th><th style="text-align:left;padding:5px 8px;font-size:11px;color:#4a5a7a">To</th></tr>${statusRows}</table>` : ''}
     ${newWriteoffs.length ? `<div style="margin-top:8px;font-size:12px;color:#c50000">⚠ ${newWriteoffs.length} new write-off flag(s) added</div>` : ''}
