@@ -1788,6 +1788,85 @@ async function blobSyncNotes() {
   await blobUpload('portal_notes.json', payload);
 }
 
+// ── Live note polling — checks blob every 60s for changes from other users ──
+const _noteSync = {
+  interval: null,
+  lastExportedAt: null,
+  idleTimeout: null,
+  idleMs: 10 * 60 * 1000,   // pause after 10 min idle
+  pollMs: 60 * 1000,         // check every 60 seconds
+  paused: false,
+};
+
+function startNotePolling() {
+  if (!BLOB_SAS_URL || _noteSync.interval) return;
+  _noteSync.interval = setInterval(_pollNotes, _noteSync.pollMs);
+  // Pause when tab is hidden, resume when visible
+  document.addEventListener('visibilitychange', _onVisibilityChange);
+  // Track user activity to detect idle
+  ['click','keydown','scroll','mousemove','touchstart'].forEach(evt =>
+    document.addEventListener(evt, _resetIdleTimer, { passive: true })
+  );
+  _resetIdleTimer();
+}
+
+function _onVisibilityChange() {
+  if (document.hidden) {
+    _pausePolling();
+  } else {
+    _resumePolling();
+    _pollNotes(); // immediate check when they come back
+  }
+}
+
+function _resetIdleTimer() {
+  if (_noteSync.paused) _resumePolling();
+  clearTimeout(_noteSync.idleTimeout);
+  _noteSync.idleTimeout = setTimeout(_pausePolling, _noteSync.idleMs);
+}
+
+function _pausePolling() {
+  _noteSync.paused = true;
+  if (_noteSync.interval) { clearInterval(_noteSync.interval); _noteSync.interval = null; }
+}
+
+function _resumePolling() {
+  _noteSync.paused = false;
+  if (!_noteSync.interval && BLOB_SAS_URL) {
+    _noteSync.interval = setInterval(_pollNotes, _noteSync.pollMs);
+  }
+}
+
+async function _pollNotes() {
+  if (!BLOB_SAS_URL || document.hidden) return;
+  try {
+    const raw = await blobFetch('portal_notes.json');
+    const data = JSON.parse(raw);
+    const remoteTs = data.exportedAt || '';
+    // Skip if we already have this version
+    if (remoteTs && remoteTs === _noteSync.lastExportedAt) return;
+    _noteSync.lastExportedAt = remoteTs;
+    const remoteNotes = data.notes || data || {};
+    const merged = mergeNotes(NOTES, remoteNotes);
+    // Quick check: did anything actually change?
+    const oldCount = Object.values(NOTES).reduce((s, arr) => s + arr.length, 0);
+    const newCount = Object.values(merged).reduce((s, arr) => s + arr.length, 0);
+    if (newCount === oldCount) { NOTES = merged; return; } // same count, silent update
+    NOTES = merged;
+    DataLayer.saveNotes(NOTES);
+    _acctCacheStamp = 0; // invalidate account cache
+    // Refresh current view if on accounts or leaderboard
+    const activePage = document.querySelector('.page.active');
+    if (activePage) {
+      const pid = activePage.id;
+      if (pid === 'page-accounts')    { renderAccounts(); if (selectedAccount) renderNotePanel(); }
+      if (pid === 'page-leaderboard') renderLeaderboard();
+      if (pid === 'page-summary')     renderBrandSummary();
+    }
+    showToast('🔄 Notes synced — ' + (newCount - oldCount) + ' new');
+  } catch(e) { /* silent fail — next poll will retry */ }
+}
+
 // ══ PAID SUMMARY PAGE ══
 
 function initPaidSummary() {
@@ -2959,9 +3038,12 @@ async function loadFromAzureBlob() {
       const merged = mergeNotes(localNotes, remoteNotes);
       NOTES = merged;
       DataLayer.saveNotes(NOTES);
+      _noteSync.lastExportedAt = remoteData.exportedAt || '';
     } catch(e) {
       NOTES = DataLayer.getNotes();
     }
+    // Start live note polling (every 60s, pauses when idle/hidden)
+    startNotePolling();
 
     // ── 5. Status bar ──
     const loadedStr  = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
