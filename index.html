@@ -2283,14 +2283,17 @@ function renderQPDTracker() {
     });
   });
 
-  // Compute discount % from AR adjustment data if collector didn't enter it
+  // Compute discount % — base is invoice amt AFTER other adjustments (not including QPD discount)
   Object.values(invoiceMap).forEach(inv => {
     // Use collector-entered qpdAmount if available, otherwise use discountTotal (AR adjustments)
     if (!inv.qpdAmount && inv.discountTotal !== 0) {
       inv.qpdAmount = Math.abs(inv.discountTotal);
     }
-    if (!inv.qpdPct && inv.invoiceAmt > 0 && inv.qpdAmount) {
-      inv.qpdPct = parseFloat(((inv.qpdAmount / inv.invoiceAmt) * 100).toFixed(1));
+    // QPD % = discount / (invoice amt + other adjustments)
+    // Other adjustments are negative, so this nets them out before calculating the discount %
+    const adjBase = inv.invoiceAmt + (inv.otherAdjTotal || 0);
+    if (!inv.qpdPct && adjBase > 0 && inv.qpdAmount) {
+      inv.qpdPct = parseFloat(((inv.qpdAmount / adjBase) * 100).toFixed(1));
     }
   });
 
