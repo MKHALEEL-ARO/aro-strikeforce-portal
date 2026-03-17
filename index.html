@@ -3633,10 +3633,23 @@ function parseARText(csvText) {
       // ── Pass 1b: Collect AR adjustments & negative AR invoices ──
       // These include: QPD discounts, insurance negotiations, sales tax adjustments,
       // TPA fees, credits, write-offs, etc. — anything that reduces the collectible amount.
-      // Primary key: customer|invoiceNumber (exact invoice match from Sage's Invoice number field)
-      // Fallback key: customer|jobId (for adjustments without a linked invoice number)
-      const adjustmentsByInvNum = {}; // "customer|invNum"  → [{...}]
-      const adjustmentsByJobKey = {}; // "customer|jobId"   → [{...}] (fallback only)
+      //
+      // Three lookup buckets — Pass 4 tries them in priority order (first non-empty wins):
+      //   1. adjustmentsByInvNum  [cust|invoiceNumber]  — exact Sage invoice link (most specific)
+      //   2. adjustmentsByRef     [cust|referenceNumber] — Reference # shared by adj + invoice (original working approach)
+      //   3. adjustmentsByJobId   [cust|jobId]           — last resort when no ref or inv# available
+      //
+      // Each adjustment is indexed under every key that has a non-empty value so nothing is lost.
+      const adjustmentsByInvNum = {};
+      const adjustmentsByRef    = {};
+      const adjustmentsByJobId  = {};
+
+      const _adjIndex = (map, key, obj) => {
+        if (!key) return;
+        if (!map[key]) map[key] = [];
+        map[key].push(obj);
+      };
+
       for (let i = 1; i < rows.length; i++) {
         const row = rows[i];
         const obj = {};
@@ -3645,15 +3658,16 @@ function parseARText(csvText) {
         const totalAmt = parseFloat(obj['Total amount'] || 0);
 
         // Collect: AR adjustments (any amount) and negative AR invoices (credits/negotiations)
-        const isAdj = recType === 'AR adjustment';
+        const isAdj   = recType === 'AR adjustment';
         const isNegInv = recType === 'AR invoice' && totalAmt < 0;
         if (!isAdj && !isNegInv) continue;
 
-        const cust = (obj['Customer name'] || '').trim();
+        const cust   = (obj['Customer name'] || '').trim();
         if (!cust) continue;
 
-        const invNum = (obj['Invoice number'] || '').trim();
-        const jobId  = (obj['Job ID'] || obj['Reference number'] || obj['Document or check no.'] || '').trim();
+        const invNum = (obj['Invoice number']  || '').trim();
+        const refNum = (obj['Reference number'] || '').trim();
+        const jobId  = (obj['Job ID'] || obj['Document or check no.'] || '').trim();
 
         const adjObj = {
           type:     isAdj ? 'adjustment' : 'credit',
@@ -3662,22 +3676,16 @@ function parseARText(csvText) {
           desc:     (obj['Description'] || obj['Memo'] || obj['Summary'] || '').trim(),
           recNum:   obj['Record number'] || '',
           invNum:   invNum,
+          refNum:   refNum,
           arCode:   (obj['AR Code'] || '').trim(),
           customer: cust,
           jobId:    jobId,
         };
 
-        if (invNum) {
-          // Primary: link by exact invoice number — prevents cross-job contamination
-          const key = cust + '|' + invNum;
-          if (!adjustmentsByInvNum[key]) adjustmentsByInvNum[key] = [];
-          adjustmentsByInvNum[key].push(adjObj);
-        } else {
-          // Fallback: no invoice number, group by job
-          const key = cust + '|' + jobId;
-          if (!adjustmentsByJobKey[key]) adjustmentsByJobKey[key] = [];
-          adjustmentsByJobKey[key].push(adjObj);
-        }
+        // Index under every available key — Pass 4 picks the best match
+        _adjIndex(adjustmentsByInvNum, invNum ? cust + '|' + invNum : null,  adjObj);
+        _adjIndex(adjustmentsByRef,    refNum ? cust + '|' + refNum : null,  adjObj);
+        _adjIndex(adjustmentsByJobId,  jobId  ? cust + '|' + jobId  : null,  adjObj);
       }
 
       // ── Pass 2: Build account objects from AR invoice rows ──
@@ -3778,20 +3786,21 @@ function parseARText(csvText) {
       });
 
       // ── Pass 4: Link adjustments to accounts, compute netCollected ──
-      // Matching priority:
-      //   1. By invoice number (a.inv) — exact Sage link, prevents cross-job contamination
-      //   2. By job ID fallback (a.jobId) — for adjustments with no invoice number recorded
+      // Priority: invoice number → reference number → job ID (first non-empty bucket wins)
+      // Using reference number as the tier-2 key restores the original working behaviour;
+      // invoice number is a higher-precision override when Sage records it on the adjustment.
       accounts.forEach(a => {
         a.adjustments = [];      // [{type, amount, date, desc, recNum, invNum}]
         a.totalAdjustments = 0;  // sum of adjustment amounts (usually negative)
         a.netCollected = 0;      // actual cash = totalAmount + adjustments (adj are negative)
 
-        // Try invoice-number match first
-        const invKey = a.customer + '|' + (a.inv || '').trim();
-        const jobKey = a.customer + '|' + (a.jobId || '').trim();
-        const byInv = (a.inv && adjustmentsByInvNum[invKey]) ? adjustmentsByInvNum[invKey] : [];
-        const byJob = (!byInv.length && a.jobId && adjustmentsByJobKey[jobKey]) ? adjustmentsByJobKey[jobKey] : [];
-        const adjs = byInv.length ? byInv : byJob;
+        const cust = a.customer;
+        const byInv = (a.inv   && adjustmentsByInvNum[cust + '|' + a.inv])   || [];
+        const byRef = (a.ref   && adjustmentsByRef   [cust + '|' + a.ref])   || [];
+        const byJob = (a.jobId && adjustmentsByJobId [cust + '|' + a.jobId]) || [];
+
+        // First non-empty bucket wins — prevents double-counting across tiers
+        const adjs = byInv.length ? byInv : byRef.length ? byRef : byJob;
 
         if (adjs.length) {
           a.adjustments = adjs;
