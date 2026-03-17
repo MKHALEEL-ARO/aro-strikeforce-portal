@@ -1817,7 +1817,7 @@ function renderPaidSummary() {
   const partialAmt = totalPartial.reduce((s, a) => s + (a.totalPaid || 0), 0);
   const grandTotal = paidFullAmt + partialAmt;
 
-  // Group by brand
+  // Group by brand (totals)
   const byBrand = {};
   paidAccts.forEach(a => {
     const bn = brandMap[a.brand] || a.brand || 'Unknown';
@@ -1826,15 +1826,40 @@ function renderPaidSummary() {
     else { byBrand[bn].partial += (a.totalPaid || 0); byBrand[bn].partialCount++; }
   });
 
-  // Group by day for trend (use paymentDate → dateFullyPaid → invoiceDate)
-  const byDay = {};
+  // Group by week + brand for the weekly grid
+  // Week key = Monday date of that week (YYYY-MM-DD)
+  function _getWeekStart(dateStr) {
+    if (!dateStr || dateStr === 'Unknown') return 'Unknown';
+    const d = new Date(dateStr + 'T12:00:00');
+    const day = d.getDay(); // 0=Sun
+    const diff = day === 0 ? 6 : day - 1; // shift so Monday=0
+    d.setDate(d.getDate() - diff);
+    return d.toISOString().slice(0, 10);
+  }
+  // Collect all brands that appear in paid data, sorted by total amount
+  const brandTotals = {};
+  paidAccts.forEach(a => {
+    const bn = brandMap[a.brand] || a.brand || 'Unknown';
+    if (!brandTotals[bn]) brandTotals[bn] = 0;
+    brandTotals[bn] += (a.totalPaid || a.totalAmount || 0);
+  });
+  const sortedBrands = Object.entries(brandTotals).sort((a, b) => b[1] - a[1]).map(e => e[0]);
+
+  // Build week × brand matrix
+  const weekBrandMatrix = {}; // { weekKey: { brandName: amount } }
+  const weekTotals = {};      // { weekKey: { total, count } }
   paidAccts.forEach(a => {
     const dk = a.paymentDate || a.dateFullyPaid || a.invoiceDate || 'Unknown';
-    if (!byDay[dk]) byDay[dk] = { paid: 0, paidCount: 0, partial: 0, partialCount: 0 };
-    if (a.payStatus === 'paid') { byDay[dk].paid += (a.totalPaid || a.totalAmount || 0); byDay[dk].paidCount++; }
-    else { byDay[dk].partial += (a.totalPaid || 0); byDay[dk].partialCount++; }
+    const wk = _getWeekStart(dk);
+    const bn = brandMap[a.brand] || a.brand || 'Unknown';
+    const amt = a.totalPaid || a.totalAmount || 0;
+    if (!weekBrandMatrix[wk]) weekBrandMatrix[wk] = {};
+    weekBrandMatrix[wk][bn] = (weekBrandMatrix[wk][bn] || 0) + amt;
+    if (!weekTotals[wk]) weekTotals[wk] = { total: 0, count: 0 };
+    weekTotals[wk].total += amt;
+    weekTotals[wk].count++;
   });
-  const sortedDays = Object.entries(byDay).sort((a, b) => b[0].localeCompare(a[0]));
+  const sortedWeeks = Object.keys(weekBrandMatrix).sort((a, b) => b.localeCompare(a));
 
   const f = n => _fmtUSD.format(n);
 
@@ -1858,67 +1883,37 @@ function renderPaidSummary() {
       </div>
     </div>
 
-    <!-- Brand Breakdown -->
-    ${Object.keys(byBrand).length ? `<div style="background:var(--white);border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:var(--shadow)">
-      <div style="font-size:14px;font-weight:700;color:var(--navy);margin-bottom:12px">Collections by Brand</div>
-      <table style="width:100%;border-collapse:collapse">
+    <!-- Weekly Collections by Brand -->
+    ${sortedWeeks.length ? `<div style="background:var(--white);border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:var(--shadow)">
+      <div style="font-size:14px;font-weight:700;color:var(--navy);margin-bottom:12px">Weekly Collections by Brand</div>
+      <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
         <tr style="background:var(--light)">
-          <th style="text-align:left;padding:8px 10px;font-size:11px;color:var(--muted);text-transform:uppercase">Brand</th>
-          <th style="text-align:right;padding:8px 10px;font-size:11px;color:var(--muted);text-transform:uppercase">Paid in Full</th>
-          <th style="text-align:center;padding:8px 10px;font-size:11px;color:var(--muted);text-transform:uppercase"># Paid</th>
-          <th style="text-align:right;padding:8px 10px;font-size:11px;color:var(--muted);text-transform:uppercase">Partial</th>
-          <th style="text-align:center;padding:8px 10px;font-size:11px;color:var(--muted);text-transform:uppercase"># Partial</th>
-          <th style="text-align:right;padding:8px 10px;font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:800">Total</th>
+          <th style="text-align:left;padding:6px 8px;font-size:11px;color:var(--muted);text-transform:uppercase;white-space:nowrap;position:sticky;left:0;background:var(--light);z-index:1">Week of</th>
+          ${sortedBrands.map(bn => `<th style="text-align:right;padding:6px 8px;font-size:10px;color:var(--navy);font-weight:700;white-space:nowrap;max-width:100px;overflow:hidden;text-overflow:ellipsis" title="${bn}">${bn.length > 14 ? bn.substring(0, 12) + '…' : bn}</th>`).join('')}
+          <th style="text-align:right;padding:6px 8px;font-size:11px;color:var(--navy);font-weight:800;white-space:nowrap">WEEK TOTAL</th>
         </tr>
-        ${Object.entries(byBrand).sort((a,b) => (b[1].paid + b[1].partial) - (a[1].paid + a[1].partial)).map(([brand, d]) => `<tr style="border-bottom:1px solid var(--border)">
-          <td style="padding:8px 10px;font-weight:600;color:var(--navy)">${brand}</td>
-          <td style="padding:8px 10px;text-align:right;color:#00479f;font-weight:600">${f(d.paid)}</td>
-          <td style="padding:8px 10px;text-align:center;color:var(--muted)">${d.paidCount}</td>
-          <td style="padding:8px 10px;text-align:right;color:#9a6200;font-weight:600">${d.partial > 0 ? f(d.partial) : '—'}</td>
-          <td style="padding:8px 10px;text-align:center;color:var(--muted)">${d.partialCount || '—'}</td>
-          <td style="padding:8px 10px;text-align:right;font-weight:800;color:#0a8a5f">${f(d.paid + d.partial)}</td>
-        </tr>`).join('')}
-        <tr style="background:var(--light);font-weight:800">
-          <td style="padding:8px 10px;color:var(--navy)">TOTAL</td>
-          <td style="padding:8px 10px;text-align:right;color:#00479f">${f(paidFullAmt)}</td>
-          <td style="padding:8px 10px;text-align:center">${totalPaidFull.length}</td>
-          <td style="padding:8px 10px;text-align:right;color:#9a6200">${f(partialAmt)}</td>
-          <td style="padding:8px 10px;text-align:center">${totalPartial.length}</td>
-          <td style="padding:8px 10px;text-align:right;color:#0a8a5f">${f(grandTotal)}</td>
-        </tr>
-      </table>
-    </div>` : ''}
-
-    <!-- Daily Trend -->
-    ${sortedDays.length ? `<div style="background:var(--white);border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:var(--shadow)">
-      <div style="font-size:14px;font-weight:700;color:var(--navy);margin-bottom:12px">Daily Collections</div>
-      <table style="width:100%;border-collapse:collapse">
-        <tr style="background:var(--light)">
-          <th style="text-align:left;padding:8px 10px;font-size:11px;color:var(--muted);text-transform:uppercase">Date</th>
-          <th style="text-align:right;padding:8px 10px;font-size:11px;color:var(--muted);text-transform:uppercase">Paid in Full</th>
-          <th style="text-align:right;padding:8px 10px;font-size:11px;color:var(--muted);text-transform:uppercase">Partial</th>
-          <th style="text-align:center;padding:8px 10px;font-size:11px;color:var(--muted);text-transform:uppercase">Invoices</th>
-          <th style="text-align:right;padding:8px 10px;font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:800">Day Total</th>
-        </tr>
-        ${sortedDays.map(([day, d]) => {
-          const dayTotal = d.paid + d.partial;
-          const dayCt = d.paidCount + d.partialCount;
-          return `<tr style="border-bottom:1px solid var(--border)">
-            <td style="padding:8px 10px;font-weight:600;color:var(--navy);white-space:nowrap">${day}</td>
-            <td style="padding:8px 10px;text-align:right;color:#00479f;font-weight:600">${d.paid > 0 ? f(d.paid) : '—'}</td>
-            <td style="padding:8px 10px;text-align:right;color:#9a6200;font-weight:600">${d.partial > 0 ? f(d.partial) : '—'}</td>
-            <td style="padding:8px 10px;text-align:center;color:var(--muted)">${dayCt}</td>
-            <td style="padding:8px 10px;text-align:right;font-weight:800;color:#0a8a5f">${f(dayTotal)}</td>
+        ${sortedWeeks.map((wk, wi) => {
+          const wkEnd = new Date(new Date(wk + 'T12:00:00').getTime() + 6 * 86400000).toISOString().slice(5, 10);
+          const wkLabel = wk.slice(5) + ' – ' + wkEnd;
+          const rowBg = wi % 2 === 0 ? '' : 'background:#fafbfe';
+          return `<tr style="${rowBg};border-bottom:1px solid var(--border)">
+            <td style="padding:6px 8px;font-weight:600;color:var(--navy);white-space:nowrap;position:sticky;left:0;${rowBg ? rowBg : 'background:var(--white)'};z-index:1">${wkLabel}</td>
+            ${sortedBrands.map(bn => {
+              const amt = weekBrandMatrix[wk][bn] || 0;
+              return `<td style="padding:6px 8px;text-align:right;${amt > 0 ? 'color:#0a8a5f;font-weight:600' : 'color:var(--muted)'}">${amt > 0 ? f(amt) : '—'}</td>`;
+            }).join('')}
+            <td style="padding:6px 8px;text-align:right;font-weight:800;color:#0a8a5f">${f(weekTotals[wk].total)}</td>
           </tr>`;
         }).join('')}
         <tr style="background:var(--light);font-weight:800">
-          <td style="padding:8px 10px;color:var(--navy)">TOTAL</td>
-          <td style="padding:8px 10px;text-align:right;color:#00479f">${f(paidFullAmt)}</td>
-          <td style="padding:8px 10px;text-align:right;color:#9a6200">${f(partialAmt)}</td>
-          <td style="padding:8px 10px;text-align:center">${paidAccts.length}</td>
-          <td style="padding:8px 10px;text-align:right;color:#0a8a5f">${f(grandTotal)}</td>
+          <td style="padding:6px 8px;color:var(--navy);position:sticky;left:0;background:var(--light);z-index:1">TOTAL</td>
+          ${sortedBrands.map(bn => `<td style="padding:6px 8px;text-align:right;color:#00479f">${f(brandTotals[bn])}</td>`).join('')}
+          <td style="padding:6px 8px;text-align:right;color:#0a8a5f">${f(grandTotal)}</td>
         </tr>
       </table>
+      </div>
+      <div style="font-size:10px;color:var(--muted);margin-top:6px">Weeks start on Monday · Brands sorted by total collected (highest first)</div>
     </div>` : ''}
 
     <!-- Invoice Detail -->
