@@ -3786,11 +3786,26 @@ function parseARText(csvText) {
       });
 
       // ── Pass 4: Link adjustments to accounts, compute netCollected ──
-      // Merge all three buckets (invNum, refNum, jobId) and deduplicate by record number.
-      // "First bucket wins" was wrong: an AR adjustment with no Reference # (only Job ID)
-      // and an insurance credit with both Reference # and Job ID for the same invoice both
-      // need to appear — the credit lands in adjustmentsByRef, the QPD adj only in
-      // adjustmentsByJobId — so we must union all three and dedup to get the full picture.
+      //
+      // Matching strategy (union of all applicable buckets, dedup by record number):
+      //   1. adjustmentsByInvNum [cust|invoiceNum]   — exact invoice-level link
+      //   2. adjustmentsByRef    [cust|referenceNum] — reference number link (most common)
+      //   3. adjustmentsByJobId  [cust|jobId]        — job-level fallback
+      //
+      // IMPORTANT: Job-level fallback is ONLY used when exactly one invoice in ACCOUNTS
+      // maps to a given customer+jobId. When multiple invoices share a job, job-level
+      // credits are ambiguous — they'd be duplicated across every invoice in that job,
+      // producing nonsensical negative balances. Sage's own Balance Due already accounts
+      // for those credits; we don't need to (and must not) double-apply them here.
+
+      // Pre-count how many invoices share each customer|jobId (to detect ambiguous jobs)
+      const jobIdInvoiceCount = {};
+      accounts.forEach(a => {
+        if (!a.jobId) return;
+        const k = a.customer + '|' + a.jobId;
+        jobIdInvoiceCount[k] = (jobIdInvoiceCount[k] || 0) + 1;
+      });
+
       accounts.forEach(a => {
         a.adjustments = [];      // [{type, amount, date, desc, recNum, invNum}]
         a.totalAdjustments = 0;  // sum of adjustment amounts (usually negative)
@@ -3799,9 +3814,13 @@ function parseARText(csvText) {
         const cust = a.customer;
         const byInv = (a.inv   && adjustmentsByInvNum[cust + '|' + a.inv])   || [];
         const byRef = (a.ref   && adjustmentsByRef   [cust + '|' + a.ref])   || [];
-        const byJob = (a.jobId && adjustmentsByJobId [cust + '|' + a.jobId]) || [];
 
-        // Union all three buckets, deduplicate by record number so nothing is double-counted
+        // Only use job-level fallback when this is the sole invoice for this customer+job
+        const jobKey = a.jobId ? cust + '|' + a.jobId : null;
+        const jobIsUnique = jobKey && (jobIdInvoiceCount[jobKey] === 1);
+        const byJob = (jobIsUnique && adjustmentsByJobId[jobKey]) || [];
+
+        // Union all applicable buckets, deduplicate by record number
         const seen = new Set();
         const adjs = [];
         [...byInv, ...byRef, ...byJob].forEach(adj => {
