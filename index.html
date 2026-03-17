@@ -2194,7 +2194,7 @@ function initQPDTracker() {
   const toEl = document.getElementById('qpd-to');
   // Default: wide date range to capture all historical 40040 transactions
   const today = new Date().toISOString().slice(0, 10);
-  if (!fromEl.value) fromEl.value = '2025-01-01';
+  if (!fromEl.value) fromEl.value = '2026-03-01';
   if (!toEl.value) toEl.value = today;
   renderQPDTracker();
 }
@@ -2249,9 +2249,12 @@ function renderQPDTracker() {
       payDate: normalizeDate(acct.dateFullyPaid || acct.paymentDate || ''),
       payMethod: acct.paymentMethod || '',
       qpdPct: qpdNote ? (qpdNote.qpdPct || 0) : 0,
+      qpdAmount: qpdNote ? (qpdNote.qpdAmount || 0) : 0,
       collector: qpdNote ? (qpdNote.by || '—') : '—',
       adjTotal: 0,
       adjCount: 0,
+      discountTotal: 0,   // AR adjustments (QPD discounts)
+      otherAdjTotal: 0,   // negative AR invoices (insurance negotiations, credits)
     };
 
     inRangeAdjs.forEach(adj => {
@@ -2275,13 +2278,19 @@ function renderQPDTracker() {
       });
       invoiceMap[acct.id].adjTotal += adj.amount;
       invoiceMap[acct.id].adjCount++;
+      if (adj.type === 'adjustment') invoiceMap[acct.id].discountTotal += adj.amount;
+      else invoiceMap[acct.id].otherAdjTotal += adj.amount;
     });
   });
 
-  // Compute discount % from actual adjustments if not provided by collector
+  // Compute discount % from AR adjustment data if collector didn't enter it
   Object.values(invoiceMap).forEach(inv => {
-    if (!inv.qpdPct && inv.invoiceAmt > 0 && inv.adjTotal !== 0) {
-      inv.qpdPct = parseFloat(((Math.abs(inv.adjTotal) / inv.invoiceAmt) * 100).toFixed(1));
+    // Use collector-entered qpdAmount if available, otherwise use discountTotal (AR adjustments)
+    if (!inv.qpdAmount && inv.discountTotal !== 0) {
+      inv.qpdAmount = Math.abs(inv.discountTotal);
+    }
+    if (!inv.qpdPct && inv.invoiceAmt > 0 && inv.qpdAmount) {
+      inv.qpdPct = parseFloat(((inv.qpdAmount / inv.invoiceAmt) * 100).toFixed(1));
     }
   });
 
@@ -2406,6 +2415,7 @@ function renderQPDTracker() {
         <th style="padding:8px 12px;text-align:right">Invoice Amt</th>
         <th style="padding:8px 12px;text-align:right">Discount Amt</th>
         <th style="padding:8px 12px;text-align:center">QPD %</th>
+        <th style="padding:8px 12px;text-align:right">Adjustments</th>
         <th style="padding:8px 12px;text-align:right">Net Collected</th>
         <th style="padding:8px 12px;text-align:left">Collector</th>
         <th style="padding:8px 12px;text-align:center">Status</th>
@@ -2421,8 +2431,9 @@ function renderQPDTracker() {
       <td style="padding:7px 12px">${inv.acct.customer}</td>
       <td style="padding:7px 12px;color:var(--muted)">${inv.brand}</td>
       <td style="padding:7px 12px;text-align:right">${fmt(inv.invoiceAmt)}</td>
-      <td style="padding:7px 12px;text-align:right;font-weight:700;color:var(--red)">${fmt(inv.adjTotal)}</td>
+      <td style="padding:7px 12px;text-align:right;font-weight:700;color:#856404">${inv.discountTotal ? fmt(inv.discountTotal) : '—'}</td>
       <td style="padding:7px 12px;text-align:center;color:#856404;font-weight:700">${inv.qpdPct ? inv.qpdPct + '%' : '—'}</td>
+      <td style="padding:7px 12px;text-align:right;color:${inv.otherAdjTotal < 0 ? 'var(--red)' : inv.otherAdjTotal > 0 ? 'var(--green)' : 'var(--muted)'}">${inv.otherAdjTotal ? fmt(inv.otherAdjTotal) : '—'}</td>
       <td style="padding:7px 12px;text-align:right;font-weight:700;color:var(--navy)">${fmt(inv.netCollected)}</td>
       <td style="padding:7px 12px">${inv.collector}</td>
       <td style="padding:7px 12px;text-align:center;font-weight:600;color:${statusColor}">${statusLabel}</td>
