@@ -1375,10 +1375,10 @@ function renderBrandSummary() {
     counts[a._recStatus] = (counts[a._recStatus] || 0) + 1;
 
     if (a.payStatus === 'paid') {
-      if (a._recStatus === 'Collected via Portal') portalCollectedAmt  += (a.totalAmount || 0);
-      else                                         outsideCollectedAmt += (a.totalAmount || 0);
+      if (a._recStatus === 'Collected via Portal') portalCollectedAmt  += (a.netCollected || a.totalAmount || 0);
+      else                                         outsideCollectedAmt += (a.netCollected || a.totalAmount || 0);
     }
-    if (a.payStatus === 'partial') partialReceivedAmt += (a.totalPaid  || 0);
+    if (a.payStatus === 'partial') partialReceivedAmt += (a.netCollected || a.totalPaid || 0);
     if (a.payStatus === 'open')    openBal            += a.balance;
 
     // Pivot: open + partial only
@@ -1943,10 +1943,10 @@ function renderPaidSummary() {
   // KPIs (real collections only)
   const totalPaidFull = paidAccts.filter(a => a.payStatus === 'paid');
   const totalPartial = paidAccts.filter(a => a.payStatus === 'partial');
-  const paidFullAmt = totalPaidFull.reduce((s, a) => s + (a.totalPaid || a.totalAmount || 0), 0);
-  const partialAmt = totalPartial.reduce((s, a) => s + (a.totalPaid || 0), 0);
+  const paidFullAmt = totalPaidFull.reduce((s, a) => s + (a.netCollected || a.totalAmount || 0), 0);
+  const partialAmt = totalPartial.reduce((s, a) => s + (a.netCollected || a.totalPaid || 0), 0);
   const grandTotal = paidFullAmt + partialAmt;
-  const rtTotal = rtAccts.reduce((s, a) => s + (a.totalPaid || a.totalAmount || 0), 0);
+  const rtTotal = rtAccts.reduce((s, a) => s + (a.netCollected || a.totalAmount || 0), 0);
   const totalAdj = paidAccts.reduce((s, a) => s + (a.totalAdjustments || 0), 0);
   const totalNet = paidAccts.reduce((s, a) => s + (a.netCollected || a.totalAmount || 0), 0);
 
@@ -1955,8 +1955,8 @@ function renderPaidSummary() {
   paidAccts.forEach(a => {
     const bn = brandMap[a.brand] || a.brand || 'Unknown';
     if (!byBrand[bn]) byBrand[bn] = { paid: 0, paidCount: 0, partial: 0, partialCount: 0 };
-    if (a.payStatus === 'paid') { byBrand[bn].paid += (a.totalPaid || a.totalAmount || 0); byBrand[bn].paidCount++; }
-    else { byBrand[bn].partial += (a.totalPaid || 0); byBrand[bn].partialCount++; }
+    if (a.payStatus === 'paid') { byBrand[bn].paid += (a.netCollected || a.totalAmount || 0); byBrand[bn].paidCount++; }
+    else { byBrand[bn].partial += (a.netCollected || a.totalPaid || 0); byBrand[bn].partialCount++; }
   });
 
   // Group by week + brand — transposed: brands as rows, weeks as columns
@@ -1979,7 +1979,7 @@ function renderPaidSummary() {
   paidAccts.forEach(a => {
     const bn = brandMap[a.brand] || a.brand || 'Unknown';
     if (!brandTotals[bn]) brandTotals[bn] = 0;
-    brandTotals[bn] += (a.totalPaid || a.totalAmount || 0);
+    brandTotals[bn] += (a.netCollected || a.totalAmount || 0);
   });
   const sortedBrands = Object.entries(brandTotals).sort((a, b) => b[1] - a[1]).map(e => e[0]);
 
@@ -1990,7 +1990,7 @@ function renderPaidSummary() {
     const dk = a.paymentDate || a.dateFullyPaid || a.invoiceDate || 'Unknown';
     const wk = _getWeekStart(dk);
     const bn = brandMap[a.brand] || a.brand || 'Unknown';
-    const amt = a.totalPaid || a.totalAmount || 0;
+    const amt = a.netCollected || a.totalAmount || 0;
     if (!weekBrandMatrix[wk]) weekBrandMatrix[wk] = {};
     weekBrandMatrix[wk][bn] = (weekBrandMatrix[wk][bn] || 0) + amt;
     if (!weekTotals[wk]) weekTotals[wk] = { total: 0, count: 0 };
@@ -2362,6 +2362,90 @@ function renderQPDTracker() {
     </tr>`;
   });
   html += `</tbody></table></div></div>`;
+
+  // ── Contra Revenue Account 40040 Transactions ──
+  // Show ALL AR adjustments that hit contra revenue account 40040 (Quick Pay Discounts booked in Sage)
+  const contraRevTxns = [];
+  ACCOUNTS.forEach(acct => {
+    if (!acct.adjustments || !acct.adjustments.length) return;
+    acct.adjustments.forEach(adj => {
+      if (!adj.arCode || !adj.arCode.includes('40040')) return;
+      // Date filter
+      const adjDate = adj.date || '';
+      if (fromDate && adjDate < fromDate) return;
+      if (toDate && adjDate > toDate) return;
+      contraRevTxns.push({
+        invoiceId: acct.id,
+        customer: adj.customer || acct.customer,
+        brand: brandMap[acct.brand] || acct.brand || '—',
+        arCode: adj.arCode,
+        amount: adj.amount,
+        date: adjDate,
+        desc: adj.desc || '',
+        recNum: adj.recNum || '',
+        invNum: adj.invNum || '',
+        type: adj.type,
+        invoiceAmt: acct.totalAmount || 0,
+        netCollected: acct.netCollected || acct.totalAmount || 0,
+        payStatus: acct.payStatus || 'open',
+      });
+    });
+  });
+  contraRevTxns.sort((a, b) => (b.date || '').localeCompare(a.date || '') || a.amount - b.amount);
+  const contraTotal = contraRevTxns.reduce((s, t) => s + t.amount, 0);
+
+  html += `<div style="background:var(--white);border-radius:12px;border:1px solid rgba(133,100,4,0.25);box-shadow:var(--shadow);overflow:hidden">
+    <div style="padding:14px 18px;border-bottom:1px solid rgba(133,100,4,0.15);display:flex;justify-content:space-between;align-items:center;background:rgba(133,100,4,0.04)">
+      <div>
+        <div style="font-size:14px;font-weight:700;color:#856404">Contra Revenue — Account 40040</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">AR adjustments booked to contra revenue account 40040 in Sage (${contraRevTxns.length} transactions, ${fmt(Math.abs(contraTotal))} total)</div>
+      </div>
+      ${contraRevTxns.length ? '<button class="btn-sm" onclick="_exportTableToCSV(\'qpd-contra-tbl\',\'Contra_Revenue_40040.csv\')" style="font-size:11px;padding:4px 10px">📥 Export CSV</button>' : ''}
+    </div>`;
+
+  if (contraRevTxns.length) {
+    html += `<div style="max-height:500px;overflow-y:auto">
+    <table id="qpd-contra-tbl" style="width:100%;border-collapse:collapse">
+      <thead><tr style="background:#4a3800;color:#ffd54f;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;position:sticky;top:0;z-index:2">
+        <th style="padding:8px 12px;text-align:left">Record #</th>
+        <th style="padding:8px 12px;text-align:left">Date</th>
+        <th style="padding:8px 12px;text-align:left">Invoice</th>
+        <th style="padding:8px 12px;text-align:left">Customer</th>
+        <th style="padding:8px 12px;text-align:left">Brand</th>
+        <th style="padding:8px 12px;text-align:left">AR Code</th>
+        <th style="padding:8px 12px;text-align:right">Contra Amt</th>
+        <th style="padding:8px 12px;text-align:right">Invoice Amt</th>
+        <th style="padding:8px 12px;text-align:right">Net Collected</th>
+        <th style="padding:8px 12px;text-align:left">Description</th>
+        <th style="padding:8px 12px;text-align:center">Pay Status</th>
+      </tr></thead><tbody>`;
+    contraRevTxns.forEach((t, i) => {
+      const statusColor = t.payStatus === 'paid' ? 'var(--green)' : t.payStatus === 'partial' ? '#9a6200' : 'var(--red)';
+      const statusLabel = t.payStatus === 'paid' ? 'PAID' : t.payStatus === 'partial' ? 'PARTIAL' : 'OPEN';
+      html += `<tr style="border-bottom:1px solid var(--border);font-size:12px;${i%2?'background:#fffdf5;':''}">
+        <td style="padding:7px 12px;font-family:monospace;font-size:11px">${t.recNum || '—'}</td>
+        <td style="padding:7px 12px;color:var(--muted)">${t.date || '—'}</td>
+        <td style="padding:7px 12px;font-weight:600"><a href="#" onclick="event.preventDefault();jumpToAccount('${t.invoiceId}')" style="color:var(--royal);text-decoration:underline">${t.invoiceId}</a></td>
+        <td style="padding:7px 12px">${t.customer}</td>
+        <td style="padding:7px 12px;color:var(--muted)">${t.brand}</td>
+        <td style="padding:7px 12px;font-family:monospace;font-size:11px;color:#856404">${t.arCode}</td>
+        <td style="padding:7px 12px;text-align:right;font-weight:700;color:var(--red)">${fmt(t.amount)}</td>
+        <td style="padding:7px 12px;text-align:right">${fmt(t.invoiceAmt)}</td>
+        <td style="padding:7px 12px;text-align:right;font-weight:700;color:var(--navy)">${fmt(t.netCollected)}</td>
+        <td style="padding:7px 12px;color:var(--muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(t.desc||'').replace(/"/g,'&quot;')}">${t.desc || '—'}</td>
+        <td style="padding:7px 12px;text-align:center"><span style="font-size:11px;font-weight:600;color:${statusColor}">${statusLabel}</span></td>
+      </tr>`;
+    });
+    html += `<tr style="border-top:2px solid rgba(133,100,4,0.3);font-weight:700;background:rgba(133,100,4,0.06)">
+      <td colspan="6" style="padding:8px 12px;color:#856404;font-size:12px">TOTAL CONTRA REVENUE (40040)</td>
+      <td style="padding:8px 12px;text-align:right;color:var(--red);font-size:13px">${fmt(contraTotal)}</td>
+      <td colspan="4"></td>
+    </tr>`;
+    html += `</tbody></table></div>`;
+  } else {
+    html += `<div style="text-align:center;padding:30px;color:var(--muted);font-size:13px">No contra revenue transactions (account 40040) found in the selected date range.</div>`;
+  }
+  html += `</div>`;
 
   container.innerHTML = html;
 }
@@ -3518,6 +3602,9 @@ function parseARText(csvText) {
           desc: (obj['Description'] || obj['Memo'] || obj['Summary'] || '').trim(),
           recNum: obj['Record number'] || '',
           invNum: obj['Invoice number'] || '',
+          arCode: (obj['AR Code'] || '').trim(),
+          customer: cust,
+          jobId: jobId,
         });
       }
 
@@ -4396,8 +4483,8 @@ function renderLeaderboard(){
     if (!collectorMap[lastCollector]) collectorMap[lastCollector] = { name:lastCollector, notes:0, eligible:0, committed:0, received:0, paidInvoices:0, biggestHit:0, b25:0, b50:0, b250:0 };
     const c = collectorMap[lastCollector];
 
-    // Credit received amount
-    const amt = acct.totalAmount || acct.balance || 0;
+    // Credit received amount (net of adjustments)
+    const amt = acct.netCollected || acct.totalAmount || acct.balance || 0;
     c.received += amt;
     c.paidInvoices++;
     if (amt > c.biggestHit) c.biggestHit = amt;
@@ -4420,7 +4507,7 @@ function renderLeaderboard(){
   const totBonuses  = data.reduce((s,r)=>s+r.totalBonus,0);
   document.getElementById('lb-stats').innerHTML=`
     <div class="stat-card sc-gold"><div class="stat-lbl">Total Contacts</div><div class="stat-val sv-gold">${data.reduce((s,r)=>s+r.notes,0)}</div><div class="stat-sub">campaign to date</div></div>
-    <div class="stat-card sc-green"><div class="stat-lbl">Cash Collected</div><div class="stat-val sv-green">${fmt(totReceived)}</div><div class="stat-sub">${totPaidInv} invoices paid</div></div>
+    <div class="stat-card sc-green"><div class="stat-lbl">Net Collected</div><div class="stat-val sv-green">${fmt(totReceived)}</div><div class="stat-sub">${totPaidInv} invoices (net of adjustments)</div></div>
     <div class="stat-card sc-royal"><div class="stat-lbl">Active Collectors</div><div class="stat-val sv-royal">${data.length}</div><div class="stat-sub">in campaign</div></div>
     <div class="stat-card sc-purple"><div class="stat-lbl">Total Bonuses Earned</div><div class="stat-val sv-purple">${fmt(totBonuses)}</div><div class="stat-sub">paid invoices only</div></div>`;
 
@@ -4500,7 +4587,7 @@ function toggleLBDetail(collectorName, rowEl) {
       id: invoiceId,
       customer: acct ? acct.customer : '—',
       brand: brandName,
-      balance: acct ? (acct.totalAmount || acct.balance) : 0,
+      balance: acct ? (acct.netCollected || acct.totalAmount || acct.balance) : 0,
       payStatus: acct ? acct.payStatus : '—',
       isRT: acct ? acct.isRecordTransfer : false,
       payDate: acct ? normalizeDate(acct.dateFullyPaid || acct.paymentDate || '') : '',
@@ -4551,7 +4638,7 @@ function toggleLBDetail(collectorName, rowEl) {
           <th style="text-align:left;padding:4px 10px">Invoice</th>
           <th style="text-align:left;padding:4px 10px">Customer</th>
           <th style="text-align:left;padding:4px 10px">Brand</th>
-          <th style="text-align:left;padding:4px 10px">Amount</th>
+          <th style="text-align:left;padding:4px 10px">Net Collected</th>
           <th style="text-align:left;padding:4px 10px">Status</th>
           <th style="text-align:left;padding:4px 10px">Pay Date</th>
           <th style="text-align:left;padding:4px 10px">Pay Method</th>
