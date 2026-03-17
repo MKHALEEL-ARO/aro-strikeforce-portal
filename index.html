@@ -707,8 +707,10 @@ body{font-family:'Titillium Web',Arial,sans-serif;background:var(--ice);color:va
           <thead><tr>
             <th class="sortable" onclick="toggleAcctSort('brand')">Brand <span id="sort-arrow-brand"></span></th>
             <th class="sortable" onclick="toggleAcctSort('customer')">Customer <span id="sort-arrow-customer"></span></th>
+            <th class="sortable" onclick="toggleAcctSort('jobId')">Job # <span id="sort-arrow-jobId"></span></th>
             <th class="sortable" onclick="toggleAcctSort('dueDate')">Due Date <span id="sort-arrow-dueDate"></span></th>
             <th class="sortable" onclick="toggleAcctSort('age')">Age <span id="sort-arrow-age"></span></th>
+            <th class="sortable" onclick="toggleAcctSort('totalAmount')">Invoice Amt <span id="sort-arrow-totalAmount"></span></th>
             <th class="sortable" onclick="toggleAcctSort('balance')">Balance Due <span id="sort-arrow-balance"></span></th>
             <th class="sortable" onclick="toggleAcctSort('state')">State <span id="sort-arrow-state"></span></th>
             <th>Job Status</th><th>AR Code</th><th>Memo</th>
@@ -4058,9 +4060,11 @@ function _renderAcctRow(a, admin1, brandMap1, selId1) {
   const bname1 = brandMap1[a.brand] || a.brand || '—';
   return `<tr class="acct-row${selCls}" onclick="selectAccount(this,'${a.id}')">
     <td style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${_esc(bname1)}">${_esc(bname1)}</td>
-    <td><div class="cust-name">${a.customer}${woNote}${litNote}</div><div class="cust-meta">${a.job || a.jobId || ''}</div>${contactLine}</td>
+    <td><div class="cust-name">${a.customer}${woNote}${litNote}</div>${contactLine}</td>
+    <td style="font-size:13px;white-space:nowrap">${a.job || a.jobId || '—'}</td>
     <td style="font-size:13px;white-space:nowrap">${a.dueDate || '—'}</td>
     <td><span class="age-badge ${a._ageCls}">${a._ageLbl}</span></td>
+    <td style="text-align:right;font-size:13px">${fmt(a.totalAmount || 0)}</td>
     <td><div class="bal-val">${fmt(a.balance)}</div></td>
     <td style="font-size:13px;white-space:nowrap">${a.state || '—'}</td>
     <td style="font-size:13px;max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${_esc(a.jobStatus)}">${_trunc(a.jobStatus,25)}</td>
@@ -4080,7 +4084,7 @@ function _renderAcctPage(filtered, page, pageSize, admin1, brandMap1, selId1) {
   const hasMore = start + pageSize < filtered.length;
   const remaining = filtered.length - start - pageSize;
   const loadMoreBtn = hasMore
-    ? `<tr id="acct-load-more"><td colspan="13" style="text-align:center;padding:12px">
+    ? `<tr id="acct-load-more"><td colspan="15" style="text-align:center;padding:12px">
         <button onclick="_loadMoreAccounts()" style="padding:8px 24px;border-radius:20px;border:1px solid var(--royal);background:rgba(0,71,159,0.06);color:var(--royal);font-weight:700;font-size:13px;cursor:pointer">
           Load More (${remaining > pageSize ? pageSize : remaining} of ${remaining} remaining)
         </button></td></tr>`
@@ -5000,14 +5004,14 @@ function toggleAcctSort(col) {
     if (_acctSortDir === 0) _acctSortCol = '';
   } else {
     _acctSortCol = col;
-    _acctSortDir = col === 'balance' || col === 'age' ? -1 : 1; // default desc for numbers, asc for text
+    _acctSortDir = col === 'balance' || col === 'age' || col === 'totalAmount' ? -1 : 1; // default desc for numbers, asc for text
   }
   _updateSortArrows();
   renderAccounts();
 }
 
 function _updateSortArrows() {
-  const cols = ['brand','customer','dueDate','age','balance','state','invoiceDate'];
+  const cols = ['brand','customer','jobId','dueDate','age','totalAmount','balance','state','invoiceDate'];
   cols.forEach(c => {
     const el = document.getElementById('sort-arrow-' + c);
     if (!el) return;
@@ -5030,6 +5034,8 @@ function _sortAccounts(arr) {
       case 'customer':    va = (a.customer || '').toLowerCase(); vb = (b.customer || '').toLowerCase(); return dir * va.localeCompare(vb);
       case 'brand':       va = (brandMap[a.brand] || a.brand || '').toLowerCase(); vb = (brandMap[b.brand] || b.brand || '').toLowerCase(); return dir * va.localeCompare(vb);
       case 'state':       va = (a.state || '').toLowerCase(); vb = (b.state || '').toLowerCase(); return dir * va.localeCompare(vb);
+      case 'totalAmount': va = a.totalAmount || 0; vb = b.totalAmount || 0; break;
+      case 'jobId':       va = (a.job || a.jobId || '').toLowerCase(); vb = (b.job || b.jobId || '').toLowerCase(); return dir * va.localeCompare(vb);
       case 'dueDate':     va = a.dueDate || ''; vb = b.dueDate || ''; return dir * va.localeCompare(vb);
       case 'invoiceDate': va = a.invoiceDate || ''; vb = b.invoiceDate || ''; return dir * va.localeCompare(vb);
       default: return 0;
