@@ -2326,7 +2326,7 @@ function renderQPDTracker() {
   // ── Stats ──
   const totalInvoices = invoiceList.length;
   const paidInvoices = invoiceList.filter(i => i.isPaid);
-  const totalDiscountCost = Math.abs(qpdAdjTotal);
+  const totalDiscountCost = invoiceList.reduce((s, i) => s + Math.abs(i.discountTotal || 0), 0);
   const grossInvAmt = paidInvoices.reduce((s, i) => s + i.invoiceAmt, 0);
   const totalNetCollected = paidInvoices.reduce((s, i) => s + i.netCollected, 0);
 
@@ -2336,7 +2336,7 @@ function renderQPDTracker() {
     const bName = brandMap[bid] || bid;
     const items = invoiceList.filter(i => i.brandId === bid);
     const paid = items.filter(i => i.isPaid);
-    const discCost = items.reduce((s, i) => s + Math.abs(i.adjTotal), 0);
+    const discCost = items.reduce((s, i) => s + Math.abs(i.discountTotal || 0), 0);
     brandStats[bid] = {
       name: bName,
       count: items.length,
@@ -2355,7 +2355,7 @@ function renderQPDTracker() {
       count: otherBrandItems.length,
       paidCount: paid.length,
       grossCollected: paid.reduce((s, i) => s + i.invoiceAmt, 0),
-      discountCost: otherBrandItems.reduce((s, i) => s + Math.abs(i.adjTotal), 0),
+      discountCost: otherBrandItems.reduce((s, i) => s + Math.abs(i.discountTotal || 0), 0),
       netCollected: paid.reduce((s, i) => s + i.netCollected, 0),
     };
   }
