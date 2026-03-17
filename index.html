@@ -1936,17 +1936,15 @@ function renderPaidSummary() {
     return true;
   });
 
-  // Split: real collections vs Record Transfer adjustments
-  const paidAccts = allPaidAccts.filter(a => !a.isRecordTransfer);
-  const rtAccts   = allPaidAccts.filter(a => a.isRecordTransfer);
+  // All paid/partial accounts (including record transfers)
+  const paidAccts = allPaidAccts;
 
-  // KPIs (real collections only)
+  // KPIs
   const totalPaidFull = paidAccts.filter(a => a.payStatus === 'paid');
   const totalPartial = paidAccts.filter(a => a.payStatus === 'partial');
   const paidFullAmt = totalPaidFull.reduce((s, a) => s + (a.netCollected || a.totalAmount || 0), 0);
   const partialAmt = totalPartial.reduce((s, a) => s + (a.netCollected || a.totalPaid || 0), 0);
   const grandTotal = paidFullAmt + partialAmt;
-  const rtTotal = rtAccts.reduce((s, a) => s + (a.netCollected || a.totalAmount || 0), 0);
   const totalAdj = paidAccts.reduce((s, a) => s + (a.totalAdjustments || 0), 0);
   const totalNet = paidAccts.reduce((s, a) => s + (a.netCollected || a.totalAmount || 0), 0);
 
@@ -2031,11 +2029,6 @@ function renderPaidSummary() {
         <div style="font-size:24px;font-weight:800;color:var(--navy);margin-top:4px">${f(totalNet)}</div>
         <div style="font-size:12px;color:var(--muted);margin-top:2px">after all adjustments</div>
       </div>
-      <div style="flex:1;min-width:180px;background:var(--white);border:1px solid rgba(197,0,0,0.15);border-radius:12px;padding:16px;box-shadow:var(--shadow)">
-        <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Record Transfers</div>
-        <div style="font-size:24px;font-weight:800;color:#c50000;margin-top:4px">${f(rtTotal)}</div>
-        <div style="font-size:12px;color:var(--muted);margin-top:2px">${rtAccts.length} adjustments</div>
-      </div>
     </div>
 
     <!-- Weekly Collections by Brand (transposed: brands as rows, weeks as columns) -->
@@ -2118,46 +2111,80 @@ function renderPaidSummary() {
       </table></div>` : '<div style="text-align:center;padding:30px;color:var(--muted)">No paid invoices found for the selected date range.</div>'}
     </div>
 
-    <!-- Record Transfer / Adjustments -->
-    ${rtAccts.length ? `<div style="background:var(--white);border:1px solid rgba(197,0,0,0.15);border-radius:12px;padding:16px;box-shadow:var(--shadow)">
+    <!-- Adjustments & Credits Detail -->
+    ${(() => {
+      // Collect all adjustment transactions across paid accounts
+      const allAdjs = [];
+      paidAccts.forEach(a => {
+        if (!a.adjustments || !a.adjustments.length) return;
+        a.adjustments.forEach(adj => {
+          allAdjs.push({
+            invoiceId: a.id,
+            customer: adj.customer || a.customer,
+            brand: brandMap[a.brand] || a.brand || '—',
+            type: adj.type,
+            amount: adj.amount,
+            date: adj.date || '',
+            desc: adj.desc || '',
+            recNum: adj.recNum || '',
+            arCode: adj.arCode || '',
+            invoiceAmt: a.totalAmount || 0,
+            netCollected: a.netCollected || a.totalAmount || 0,
+          });
+        });
+      });
+      allAdjs.sort((a, b) => (b.date || '').localeCompare(a.date || '') || a.amount - b.amount);
+      const adjGrandTotal = allAdjs.reduce((s, t) => s + t.amount, 0);
+      if (!allAdjs.length) return '';
+      return `<div style="background:var(--white);border:1px solid rgba(133,100,4,0.25);border-radius:12px;padding:16px;box-shadow:var(--shadow)">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
         <div>
-          <div style="font-size:14px;font-weight:700;color:#c50000">⚠ Record Transfers / Adjustments</div>
-          <div style="font-size:11px;color:var(--muted);margin-top:2px">Invoices cleared via internal Sage transfers — not actual cash collections (${rtAccts.length} records, ${f(rtTotal)})</div>
+          <div style="font-size:14px;font-weight:700;color:#856404">Adjustments &amp; Credits</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">AR adjustments, credit memos, insurance negotiations, and QPD discounts applied to paid invoices (${allAdjs.length} transactions, ${f(adjGrandTotal)})</div>
         </div>
-        <button class="btn-sm" onclick="_exportTableToCSV('paid-rt-tbl','record_transfer_adjustments.csv')" style="font-size:11px;padding:4px 12px">📥 Export CSV</button>
+        <button class="btn-sm" onclick="_exportTableToCSV('paid-adj-tbl','adjustments_credits_detail.csv')" style="font-size:11px;padding:4px 12px">📥 Export CSV</button>
       </div>
       <div style="overflow-x:auto;max-height:500px;overflow-y:auto">
-      <table id="paid-rt-tbl" style="width:100%;border-collapse:collapse;font-size:12px">
+      <table id="paid-adj-tbl" style="width:100%;border-collapse:collapse;font-size:12px">
         <thead>
-        <tr style="background:#5a0000;position:sticky;top:0;z-index:3">
-          <th style="text-align:left;padding:8px 8px;font-size:11px;color:#ffb3b3;text-transform:uppercase;letter-spacing:1px">Invoice</th>
-          <th style="text-align:left;padding:8px 8px;font-size:11px;color:#ffb3b3;text-transform:uppercase;letter-spacing:1px">Customer</th>
-          <th style="text-align:left;padding:8px 8px;font-size:11px;color:#ffb3b3;text-transform:uppercase;letter-spacing:1px">Brand</th>
-          <th style="text-align:right;padding:8px 8px;font-size:11px;color:#ffb3b3;text-transform:uppercase;letter-spacing:1px">Total Amt</th>
-          <th style="text-align:right;padding:8px 8px;font-size:11px;color:#ffb3b3;text-transform:uppercase;letter-spacing:1px">Transferred</th>
-          <th style="text-align:right;padding:8px 8px;font-size:11px;color:#ffb3b3;text-transform:uppercase;letter-spacing:1px">Balance</th>
-          <th style="text-align:center;padding:8px 8px;font-size:11px;color:#ffb3b3;text-transform:uppercase;letter-spacing:1px">Status</th>
-          <th style="text-align:left;padding:8px 8px;font-size:11px;color:#ffb3b3;text-transform:uppercase;letter-spacing:1px">Date</th>
-          <th style="text-align:left;padding:8px 8px;font-size:11px;color:#ffb3b3;text-transform:uppercase;letter-spacing:1px">Method</th>
+        <tr style="background:#4a3800;position:sticky;top:0;z-index:3">
+          <th style="text-align:left;padding:8px 8px;font-size:11px;color:#ffd54f;text-transform:uppercase;letter-spacing:1px">Record #</th>
+          <th style="text-align:left;padding:8px 8px;font-size:11px;color:#ffd54f;text-transform:uppercase;letter-spacing:1px">Date</th>
+          <th style="text-align:left;padding:8px 8px;font-size:11px;color:#ffd54f;text-transform:uppercase;letter-spacing:1px">Invoice</th>
+          <th style="text-align:left;padding:8px 8px;font-size:11px;color:#ffd54f;text-transform:uppercase;letter-spacing:1px">Customer</th>
+          <th style="text-align:left;padding:8px 8px;font-size:11px;color:#ffd54f;text-transform:uppercase;letter-spacing:1px">Brand</th>
+          <th style="text-align:center;padding:8px 8px;font-size:11px;color:#ffd54f;text-transform:uppercase;letter-spacing:1px">Type</th>
+          <th style="text-align:left;padding:8px 8px;font-size:11px;color:#ffd54f;text-transform:uppercase;letter-spacing:1px">AR Code</th>
+          <th style="text-align:right;padding:8px 8px;font-size:11px;color:#ffd54f;text-transform:uppercase;letter-spacing:1px">Amount</th>
+          <th style="text-align:right;padding:8px 8px;font-size:11px;color:#ffd54f;text-transform:uppercase;letter-spacing:1px">Invoice Amt</th>
+          <th style="text-align:right;padding:8px 8px;font-size:11px;color:#ffd54f;text-transform:uppercase;letter-spacing:1px">Net Collected</th>
+          <th style="text-align:left;padding:8px 8px;font-size:11px;color:#ffd54f;text-transform:uppercase;letter-spacing:1px">Description</th>
         </tr>
         </thead>
         <tbody>
-        ${rtAccts.sort((a,b) => (b.paymentDate||b.dateFullyPaid||'').localeCompare(a.paymentDate||a.dateFullyPaid||'') || (b.totalPaid||0) - (a.totalPaid||0)).map((a, ai) => `<tr style="${ai % 2 ? 'background:#fff5f5;' : ''}border-bottom:1px solid rgba(197,0,0,0.1)">
-          <td style="padding:5px 8px;font-family:monospace">${a.id}</td>
-          <td style="padding:5px 8px">${a.customer}</td>
-          <td style="padding:5px 8px;color:var(--muted)">${brandMap[a.brand] || a.brand || '—'}</td>
-          <td style="padding:5px 8px;text-align:right">${f(a.totalAmount || 0)}</td>
-          <td style="padding:5px 8px;text-align:right;font-weight:700;color:#c50000">${f(a.totalPaid || 0)}</td>
-          <td style="padding:5px 8px;text-align:right;color:${a.balance > 0 ? '#c50000' : 'var(--muted)'}">${a.balance > 0 ? f(a.balance) : '—'}</td>
-          <td style="padding:5px 8px;text-align:center"><span style="background:rgba(197,0,0,0.08);color:#c50000;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600">TRANSFER</span></td>
-          <td style="padding:5px 8px;color:var(--muted)">${a.paymentDate || a.dateFullyPaid || '—'}</td>
-          <td style="padding:5px 8px;color:#c50000;font-weight:600;font-size:11px">${a.paymentMethod || 'Record Transfer'}</td>
+        ${allAdjs.map((t, i) => `<tr style="${i%2?'background:#fffdf5;':''}border-bottom:1px solid var(--border)">
+          <td style="padding:5px 8px;font-family:monospace;font-size:11px">${t.recNum || '—'}</td>
+          <td style="padding:5px 8px;color:var(--muted)">${t.date || '—'}</td>
+          <td style="padding:5px 8px;font-weight:600"><a href="#" onclick="event.preventDefault();jumpToAccount('${t.invoiceId}')" style="color:var(--royal);text-decoration:underline">${t.invoiceId}</a></td>
+          <td style="padding:5px 8px">${t.customer}</td>
+          <td style="padding:5px 8px;color:var(--muted)">${t.brand}</td>
+          <td style="padding:5px 8px;text-align:center"><span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;background:${t.type==='adjustment'?'rgba(133,100,4,0.1);color:#856404':'rgba(0,71,159,0.1);color:var(--royal)'}">${t.type==='adjustment'?'ADJ':'CREDIT'}</span></td>
+          <td style="padding:5px 8px;font-family:monospace;font-size:11px;color:#856404">${t.arCode || '—'}</td>
+          <td style="padding:5px 8px;text-align:right;font-weight:700;color:${t.amount<0?'var(--red)':'var(--green)'}">${f(t.amount)}</td>
+          <td style="padding:5px 8px;text-align:right">${f(t.invoiceAmt)}</td>
+          <td style="padding:5px 8px;text-align:right;font-weight:700;color:var(--navy)">${f(t.netCollected)}</td>
+          <td style="padding:5px 8px;color:var(--muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(t.desc||'').replace(/"/g,'&quot;')}">${t.desc || '—'}</td>
         </tr>`).join('')}
+        <tr style="border-top:2px solid rgba(133,100,4,0.3);font-weight:700;background:rgba(133,100,4,0.06)">
+          <td colspan="7" style="padding:8px 8px;color:#856404;font-size:12px">TOTAL ADJUSTMENTS &amp; CREDITS</td>
+          <td style="padding:8px 8px;text-align:right;color:var(--red);font-size:13px">${f(adjGrandTotal)}</td>
+          <td colspan="3"></td>
+        </tr>
         </tbody>
       </table>
       </div>
-    </div>` : ''}
+    </div>`;
+    })()}
   `;
 }
 
