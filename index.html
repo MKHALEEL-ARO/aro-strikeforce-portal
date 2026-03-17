@@ -3786,9 +3786,11 @@ function parseARText(csvText) {
       });
 
       // ── Pass 4: Link adjustments to accounts, compute netCollected ──
-      // Priority: invoice number → reference number → job ID (first non-empty bucket wins)
-      // Using reference number as the tier-2 key restores the original working behaviour;
-      // invoice number is a higher-precision override when Sage records it on the adjustment.
+      // Merge all three buckets (invNum, refNum, jobId) and deduplicate by record number.
+      // "First bucket wins" was wrong: an AR adjustment with no Reference # (only Job ID)
+      // and an insurance credit with both Reference # and Job ID for the same invoice both
+      // need to appear — the credit lands in adjustmentsByRef, the QPD adj only in
+      // adjustmentsByJobId — so we must union all three and dedup to get the full picture.
       accounts.forEach(a => {
         a.adjustments = [];      // [{type, amount, date, desc, recNum, invNum}]
         a.totalAdjustments = 0;  // sum of adjustment amounts (usually negative)
@@ -3799,8 +3801,13 @@ function parseARText(csvText) {
         const byRef = (a.ref   && adjustmentsByRef   [cust + '|' + a.ref])   || [];
         const byJob = (a.jobId && adjustmentsByJobId [cust + '|' + a.jobId]) || [];
 
-        // First non-empty bucket wins — prevents double-counting across tiers
-        const adjs = byInv.length ? byInv : byRef.length ? byRef : byJob;
+        // Union all three buckets, deduplicate by record number so nothing is double-counted
+        const seen = new Set();
+        const adjs = [];
+        [...byInv, ...byRef, ...byJob].forEach(adj => {
+          const key = adj.recNum || (adj.date + '|' + adj.amount + '|' + adj.type);
+          if (!seen.has(key)) { seen.add(key); adjs.push(adj); }
+        });
 
         if (adjs.length) {
           a.adjustments = adjs;
