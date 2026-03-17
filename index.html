@@ -2327,6 +2327,12 @@ async function renderBriefingPage() {
   }
 }
 
+function _briefingFullWidth(container) {
+  // Strip email-width constraint from injected briefing HTML for portal display
+  const wrap = container.querySelector('[style*="max-width"]');
+  if (wrap) { wrap.style.maxWidth = '100%'; wrap.style.boxShadow = 'none'; wrap.style.borderRadius = '0'; }
+}
+
 async function loadBriefingForDate(dateStr) {
   const container = document.getElementById('briefing-content');
   container.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted)">Loading…</div>';
@@ -2337,6 +2343,7 @@ async function loadBriefingForDate(dateStr) {
     const data = JSON.parse(raw);
     if (data.html) {
       container.innerHTML = data.html;
+      _briefingFullWidth(container);
       return;
     }
   } catch(e) { /* not found in blob */ }
@@ -2347,6 +2354,7 @@ async function loadBriefingForDate(dateStr) {
     const agingHistory = await loadAgingHistory();
     const html = generateDailyBriefing(today, agingHistory);
     container.innerHTML = html;
+    _briefingFullWidth(container);
   } else {
     container.innerHTML = '<div style="text-align:center;padding:60px;color:var(--muted)"><div style="font-size:36px;margin-bottom:12px">📭</div><p>No briefing found for ' + dateStr + '.</p><p style="font-size:12px;margin-top:8px">Briefings are generated when an admin logs in each day.</p></div>';
   }
@@ -2360,6 +2368,7 @@ async function generateAndShowBriefing() {
     const agingHistory = await loadAgingHistory();
     const html = generateDailyBriefing(today, agingHistory);
     container.innerHTML = html;
+    _briefingFullWidth(container);
     // Save to blob
     if (BLOB_SAS_URL) {
       await blobUpload('briefing_' + today + '.json', JSON.stringify({
