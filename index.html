@@ -761,8 +761,8 @@ body{font-family:'Titillium Web',Arial,sans-serif;background:var(--ice);color:va
     <table class="lb-table">
       <thead><tr>
         <th>Rank</th><th>Collector</th><th>Entity</th>
-        <th>Committed</th><th>Received</th>
-        <th>Contacts</th><th>Invoices Cleared</th><th>Biggest Hit</th>
+        <th>Committed</th><th>Collected</th><th>Paid Inv.</th>
+        <th>Contacts</th><th>Eligible</th><th>Biggest Hit</th>
         <th>$25</th><th>$50</th><th>Mega</th><th>Total Bonus</th>
       </tr></thead>
       <tbody id="lb-tbody"></tbody>
@@ -3907,31 +3907,66 @@ function exportWriteOff() {
 function renderLeaderboard(){
   const allNotes = DataLayer.getNotes();
   const bonus = DataLayer.getBonus();
-  const campaignStart = new Date(bonus.startDate);
+  const campaignStart = normalizeDate(bonus.startDate);
+  const campaignEnd   = normalizeDate(bonus.endDate);
   const collectorMap = {};
 
   // Build lookup map once (O(n) instead of O(n*m) with .find())
   const acctMap = {};
   ACCOUNTS.forEach(a => { acctMap[a.id] = a; });
 
+  // ── Pass 1: Count contacts, committed amounts per collector ──
   Object.entries(allNotes).forEach(([invoiceId, noteList]) => {
     const portalNotes = noteList.filter(n => n.source === 'portal');
     portalNotes.forEach(n => {
-      const nd = new Date(n.date);
+      const nd = normalizeDate(n.date);
       const eligible = nd >= campaignStart;
-      if (!collectorMap[n.by]) collectorMap[n.by] = { name:n.by, notes:0, eligible:0, committed:0, received:0, b25:0, b50:0, b250:0 };
+      if (!collectorMap[n.by]) collectorMap[n.by] = { name:n.by, notes:0, eligible:0, committed:0, received:0, paidInvoices:0, biggestHit:0, b25:0, b50:0, b250:0 };
       collectorMap[n.by].notes++;
       if (eligible) collectorMap[n.by].eligible++;
       if (n.committedAmount > 0) collectorMap[n.by].committed += n.committedAmount;
     });
-    // Received: credit the last collector who had a portal note on a now-paid invoice
+  });
+
+  // ── Pass 2: Credit bonuses ONLY for paid invoices ──
+  // Bonus is earned when the invoice is paid, not when contacted.
+  // The last collector who logged a portal note gets credit.
+  // Exclude Record Transfers (internal adjustments, not real cash).
+  Object.entries(allNotes).forEach(([invoiceId, noteList]) => {
     const acct = acctMap[invoiceId];
-    if (acct && acct.payStatus === 'paid' && portalNotes.length > 0) {
-      const lastCollector = portalNotes[portalNotes.length - 1].by;
-      if (collectorMap[lastCollector]) {
-        collectorMap[lastCollector].received += (acct.totalAmount || 0);
-      }
-    }
+    if (!acct) return;
+    if (acct.payStatus !== 'paid' && acct.payStatus !== 'partial') return;
+    if (acct.isRecordTransfer) return; // internal adjustments don't count
+
+    const portalNotes = noteList.filter(n => n.source === 'portal');
+    if (portalNotes.length === 0) return;
+
+    // Check that payment date falls within campaign window
+    const payDate = normalizeDate(acct.dateFullyPaid || acct.paymentDate || '');
+    if (!payDate || payDate < campaignStart) return;
+    if (campaignEnd && payDate > campaignEnd) return;
+
+    // Also require at least one portal note was logged during the campaign
+    const hasCampaignNote = portalNotes.some(n => normalizeDate(n.date) >= campaignStart);
+    if (!hasCampaignNote) return;
+
+    // Credit the last collector who logged a portal note
+    const lastCollector = portalNotes[portalNotes.length - 1].by;
+    if (!collectorMap[lastCollector]) collectorMap[lastCollector] = { name:lastCollector, notes:0, eligible:0, committed:0, received:0, paidInvoices:0, biggestHit:0, b25:0, b50:0, b250:0 };
+    const c = collectorMap[lastCollector];
+
+    // Credit received amount
+    const amt = acct.totalAmount || acct.balance || 0;
+    c.received += amt;
+    c.paidInvoices++;
+    if (amt > c.biggestHit) c.biggestHit = amt;
+
+    // Determine bonus tier using the invoice's aging & balance
+    const d = daysAged(acct.dueDate);
+    const tier = bonusFor(acct, d);
+    if (tier.includes('MEGA'))    c.b250++;
+    else if (tier.includes('50')) c.b50++;
+    else if (tier.includes('25')) c.b25++;
   });
 
   const data = Object.values(collectorMap).map(c => ({
@@ -3939,13 +3974,14 @@ function renderLeaderboard(){
     totalBonus: c.b25 * bonus.b25 + c.b50 * bonus.b50 + c.b250 * bonus.b250
   })).sort((a,b) => (b.received + b.committed) - (a.received + a.committed));
 
-  const totCollected = data.reduce((s,r)=>s+0,0);
-  const totCleared = data.reduce((s,r)=>s+r.eligible,0);
+  const totReceived = data.reduce((s,r)=>s+r.received,0);
+  const totPaidInv  = data.reduce((s,r)=>s+r.paidInvoices,0);
+  const totBonuses  = data.reduce((s,r)=>s+r.totalBonus,0);
   document.getElementById('lb-stats').innerHTML=`
     <div class="stat-card sc-gold"><div class="stat-lbl">Total Contacts</div><div class="stat-val sv-gold">${data.reduce((s,r)=>s+r.notes,0)}</div><div class="stat-sub">campaign to date</div></div>
-    <div class="stat-card sc-green"><div class="stat-lbl">Eligible Contacts</div><div class="stat-val sv-green">${totCleared}</div><div class="stat-sub">bonus-eligible</div></div>
+    <div class="stat-card sc-green"><div class="stat-lbl">Cash Collected</div><div class="stat-val sv-green">${fmt(totReceived)}</div><div class="stat-sub">${totPaidInv} invoices paid</div></div>
     <div class="stat-card sc-royal"><div class="stat-lbl">Active Collectors</div><div class="stat-val sv-royal">${data.length}</div><div class="stat-sub">in campaign</div></div>
-    <div class="stat-card sc-purple"><div class="stat-lbl">Total Bonuses Paid</div><div class="stat-val sv-purple">${fmt(data.reduce((s,r)=>s+(r.b25*bonus.b25+r.b50*bonus.b50+r.b250*bonus.b250),0))}</div><div class="stat-sub">this campaign</div></div>`;
+    <div class="stat-card sc-purple"><div class="stat-lbl">Total Bonuses Earned</div><div class="stat-val sv-purple">${fmt(totBonuses)}</div><div class="stat-sub">paid invoices only</div></div>`;
 
   // Build lookup maps once for leaderboard rendering
   const userByName = {};
@@ -3971,16 +4007,17 @@ function renderLeaderboard(){
       <td style="font-size:12px;color:var(--muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${brandNames}">${brandShort}</td>
       <td style="font-weight:700;color:var(--royal)">${r.committed>0?fmt(r.committed):'—'}</td>
       <td style="font-weight:700;color:var(--green)">${r.received>0?fmt(r.received):'—'}</td>
+      <td style="text-align:center">${r.paidInvoices}</td>
       <td style="text-align:center">${r.notes}</td>
       <td style="text-align:center">${r.eligible}</td>
-      <td style="color:var(--royal)">—</td>
+      <td style="font-weight:700;color:var(--royal)">${r.biggestHit>0?fmt(r.biggestHit):'—'}</td>
       <td style="text-align:center">${r.b25}</td>
       <td style="text-align:center">${r.b50}</td>
       <td style="text-align:center">${r.b250}</td>
       <td style="font-weight:700;color:var(--gold)">${fmt(totalBonus)}</td>
     </tr>
     <tr class="lb-detail-row" id="lb-detail-${safeName.replace(/\s/g,'_')}" style="display:none">
-      <td colspan="12" style="padding:0"></td>
+      <td colspan="13" style="padding:0"></td>
     </tr>`;
   }).join('');
 }
@@ -3992,6 +4029,9 @@ function toggleLBDetail(collectorName, rowEl) {
   if (detailRow.style.display !== 'none') { detailRow.style.display = 'none'; return; }
   // Find all invoices this collector has notes on
   const allNotes = DataLayer.getNotes();
+  const bonus = DataLayer.getBonus();
+  const campaignStart = normalizeDate(bonus.startDate);
+  const campaignEnd   = normalizeDate(bonus.endDate);
   const invoices = [];
   Object.entries(allNotes).forEach(([invoiceId, noteList]) => {
     const byCollector = noteList.filter(n => n.by === collectorName);
@@ -3999,46 +4039,85 @@ function toggleLBDetail(collectorName, rowEl) {
     const acct = ACCOUNTS.find(a => a.id === invoiceId);
     const lastNote = byCollector[byCollector.length - 1];
     const brandName = acct ? (BRANDS.find(b => b.id === acct.brand)?.name || acct.brand) : '—';
+
+    // Determine bonus earned (only if paid, in campaign window, not RT)
+    let bonusEarned = '';
+    let bonusAmt = 0;
+    if (acct && (acct.payStatus === 'paid' || acct.payStatus === 'partial') && !acct.isRecordTransfer) {
+      const payDate = normalizeDate(acct.dateFullyPaid || acct.paymentDate || '');
+      const hasCampaignNote = byCollector.some(n => n.source === 'portal' && normalizeDate(n.date) >= campaignStart);
+      if (payDate && payDate >= campaignStart && (!campaignEnd || payDate <= campaignEnd) && hasCampaignNote) {
+        const d = daysAged(acct.dueDate);
+        const tier = bonusFor(acct, d);
+        if (tier.includes('MEGA'))    { bonusEarned = 'MEGA'; bonusAmt = bonus.b250; }
+        else if (tier.includes('50')) { bonusEarned = '$50'; bonusAmt = bonus.b50; }
+        else if (tier.includes('25')) { bonusEarned = '$25'; bonusAmt = bonus.b25; }
+      }
+    }
+
     invoices.push({
       id: invoiceId,
       customer: acct ? acct.customer : '—',
       brand: brandName,
-      balance: acct ? acct.balance : 0,
+      balance: acct ? (acct.totalAmount || acct.balance) : 0,
       payStatus: acct ? acct.payStatus : '—',
+      isRT: acct ? acct.isRecordTransfer : false,
+      payDate: acct ? normalizeDate(acct.dateFullyPaid || acct.paymentDate || '') : '',
+      payMethod: acct ? (acct.paymentMethod || '') : '',
       noteCount: byCollector.length,
       lastDate: lastNote.date || '—',
-      lastMethod: lastNote.method || '—',
+      bonusEarned: bonusEarned,
+      bonusAmt: bonusAmt,
     });
   });
-  invoices.sort((a,b) => b.balance - a.balance);
+  // Sort: paid invoices with bonuses first, then by balance descending
+  invoices.sort((a,b) => {
+    if (a.bonusEarned && !b.bonusEarned) return -1;
+    if (!a.bonusEarned && b.bonusEarned) return 1;
+    return b.balance - a.balance;
+  });
+
+  const paidCount = invoices.filter(i => i.payStatus === 'paid' || i.payStatus === 'partial').length;
+  const totalBonusAmt = invoices.reduce((s,i) => s + i.bonusAmt, 0);
+
   const rows = invoices.map(inv => {
-    const statusColor = inv.payStatus === 'paid' ? 'var(--green)' : inv.payStatus === 'partial' ? '#7A4E00' : 'var(--red)';
-    return `<tr style="font-size:12px;border-bottom:1px solid var(--border)">
+    const isPaid = inv.payStatus === 'paid' || inv.payStatus === 'partial';
+    const statusColor = isPaid ? 'var(--green)' : 'var(--red)';
+    const rowBg = inv.bonusEarned ? 'background:rgba(34,139,34,0.06);' : inv.isRT ? 'background:rgba(90,0,0,0.04);' : '';
+    const bonusHtml = inv.bonusEarned
+      ? `<span style="font-weight:700;color:${inv.bonusEarned==='MEGA'?'var(--gold)':'var(--green)'};">${inv.bonusEarned}</span>`
+      : (isPaid && inv.isRT ? '<span style="font-size:10px;color:var(--muted)">RT</span>' : (isPaid ? '<span style="font-size:10px;color:var(--muted)">no bonus</span>' : '—'));
+    return `<tr style="font-size:12px;border-bottom:1px solid var(--border);${rowBg}">
       <td style="padding:6px 10px;font-weight:600"><a href="#" onclick="event.stopPropagation();jumpToAccount('${inv.id}');return false;" style="color:var(--royal);text-decoration:underline">${inv.id}</a></td>
       <td style="padding:6px 10px">${inv.customer}</td>
       <td style="padding:6px 10px;color:var(--muted)">${inv.brand}</td>
       <td style="padding:6px 10px;font-weight:700">${fmt(inv.balance)}</td>
-      <td style="padding:6px 10px;font-weight:600;color:${statusColor}">${inv.payStatus}</td>
+      <td style="padding:6px 10px;font-weight:600;color:${statusColor}">${inv.payStatus}${inv.isRT?' <span style="font-size:9px;color:#5a0000">(RT)</span>':''}</td>
+      <td style="padding:6px 10px;color:var(--muted)">${inv.payDate || '—'}</td>
+      <td style="padding:6px 10px;color:var(--muted)">${inv.payMethod || '—'}</td>
       <td style="padding:6px 10px;text-align:center">${inv.noteCount}</td>
-      <td style="padding:6px 10px;color:var(--muted)">${inv.lastDate}</td>
-      <td style="padding:6px 10px;color:var(--muted)">${inv.lastMethod}</td>
+      <td style="padding:6px 10px;text-align:center">${bonusHtml}</td>
     </tr>`;
   }).join('');
   detailRow.querySelector('td').innerHTML = `
     <div style="background:rgba(10,15,51,0.02);padding:12px;border-radius:8px;margin:4px 0">
-      <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:8px">${collectorName}'s Invoices (${invoices.length})</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted)">${collectorName}'s Invoices (${invoices.length}) &nbsp;·&nbsp; ${paidCount} Paid</div>
+        ${totalBonusAmt > 0 ? '<div style="font-size:13px;font-weight:700;color:var(--gold)">Bonus Earned: '+fmt(totalBonusAmt)+'</div>' : ''}
+      </div>
       <table style="width:100%;border-collapse:collapse">
         <thead><tr style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">
           <th style="text-align:left;padding:4px 10px">Invoice</th>
           <th style="text-align:left;padding:4px 10px">Customer</th>
           <th style="text-align:left;padding:4px 10px">Brand</th>
-          <th style="text-align:left;padding:4px 10px">Balance</th>
+          <th style="text-align:left;padding:4px 10px">Amount</th>
           <th style="text-align:left;padding:4px 10px">Status</th>
+          <th style="text-align:left;padding:4px 10px">Pay Date</th>
+          <th style="text-align:left;padding:4px 10px">Pay Method</th>
           <th style="text-align:center;padding:4px 10px">Notes</th>
-          <th style="text-align:left;padding:4px 10px">Last Note</th>
-          <th style="text-align:left;padding:4px 10px">Method</th>
+          <th style="text-align:center;padding:4px 10px">Bonus</th>
         </tr></thead>
-        <tbody>${rows || '<tr><td colspan="8" style="padding:10px;color:var(--muted);text-align:center">No invoices found</td></tr>'}</tbody>
+        <tbody>${rows || '<tr><td colspan="9" style="padding:10px;color:var(--muted);text-align:center">No invoices found</td></tr>'}</tbody>
       </table>
     </div>`;
   detailRow.style.display = 'table-row';
