@@ -1799,11 +1799,12 @@ function renderPaidSummary() {
   const brandMap = Object.fromEntries(BRANDS.map(b => [b.id, b.name]));
 
   // Filter paid/partial accounts within date range
+  // Dates are already normalized to YYYY-MM-DD by the parser
   const paidAccts = ACCOUNTS.filter(a => {
     if (a.payStatus !== 'paid' && a.payStatus !== 'partial') return false;
     if (brandFilter && a.brand !== brandFilter) return false;
-    // Use dateFullyPaid for paid, invoiceDate as fallback for partial
-    const dateKey = a.payStatus === 'paid' ? (a.dateFullyPaid || a.invoiceDate || '') : (a.invoiceDate || '');
+    // Use paymentDate first, then dateFullyPaid, then invoiceDate as fallback
+    const dateKey = a.paymentDate || a.dateFullyPaid || a.invoiceDate || '';
     if (fromDate && dateKey < fromDate) return false;
     if (toDate && dateKey > toDate) return false;
     return true;
@@ -1812,7 +1813,7 @@ function renderPaidSummary() {
   // KPIs
   const totalPaidFull = paidAccts.filter(a => a.payStatus === 'paid');
   const totalPartial = paidAccts.filter(a => a.payStatus === 'partial');
-  const paidFullAmt = totalPaidFull.reduce((s, a) => s + (a.totalAmount || 0), 0);
+  const paidFullAmt = totalPaidFull.reduce((s, a) => s + (a.totalPaid || a.totalAmount || 0), 0);
   const partialAmt = totalPartial.reduce((s, a) => s + (a.totalPaid || 0), 0);
   const grandTotal = paidFullAmt + partialAmt;
 
@@ -1821,16 +1822,16 @@ function renderPaidSummary() {
   paidAccts.forEach(a => {
     const bn = brandMap[a.brand] || a.brand || 'Unknown';
     if (!byBrand[bn]) byBrand[bn] = { paid: 0, paidCount: 0, partial: 0, partialCount: 0 };
-    if (a.payStatus === 'paid') { byBrand[bn].paid += (a.totalAmount || 0); byBrand[bn].paidCount++; }
+    if (a.payStatus === 'paid') { byBrand[bn].paid += (a.totalPaid || a.totalAmount || 0); byBrand[bn].paidCount++; }
     else { byBrand[bn].partial += (a.totalPaid || 0); byBrand[bn].partialCount++; }
   });
 
-  // Group by day for trend
+  // Group by day for trend (use paymentDate → dateFullyPaid → invoiceDate)
   const byDay = {};
   paidAccts.forEach(a => {
-    const dk = a.payStatus === 'paid' ? (a.dateFullyPaid || a.invoiceDate || 'Unknown') : (a.invoiceDate || 'Unknown');
+    const dk = a.paymentDate || a.dateFullyPaid || a.invoiceDate || 'Unknown';
     if (!byDay[dk]) byDay[dk] = { paid: 0, paidCount: 0, partial: 0, partialCount: 0 };
-    if (a.payStatus === 'paid') { byDay[dk].paid += (a.totalAmount || 0); byDay[dk].paidCount++; }
+    if (a.payStatus === 'paid') { byDay[dk].paid += (a.totalPaid || a.totalAmount || 0); byDay[dk].paidCount++; }
     else { byDay[dk].partial += (a.totalPaid || 0); byDay[dk].partialCount++; }
   });
   const sortedDays = Object.entries(byDay).sort((a, b) => b[0].localeCompare(a[0]));
@@ -1932,9 +1933,10 @@ function renderPaidSummary() {
           <th style="text-align:right;padding:6px 8px;font-size:11px;color:var(--muted)">Paid</th>
           <th style="text-align:right;padding:6px 8px;font-size:11px;color:var(--muted)">Balance</th>
           <th style="text-align:center;padding:6px 8px;font-size:11px;color:var(--muted)">Status</th>
-          <th style="text-align:left;padding:6px 8px;font-size:11px;color:var(--muted)">Date Paid</th>
+          <th style="text-align:left;padding:6px 8px;font-size:11px;color:var(--muted)">Payment Date</th>
+          <th style="text-align:left;padding:6px 8px;font-size:11px;color:var(--muted)">Method</th>
         </tr>
-        ${paidAccts.sort((a,b) => (b.totalPaid||0) - (a.totalPaid||0)).map(a => `<tr style="border-bottom:1px solid var(--border)">
+        ${paidAccts.sort((a,b) => (b.paymentDate||b.dateFullyPaid||'').localeCompare(a.paymentDate||a.dateFullyPaid||'') || (b.totalPaid||0) - (a.totalPaid||0)).map(a => `<tr style="border-bottom:1px solid var(--border)">
           <td style="padding:5px 8px;font-family:monospace">${a.id}</td>
           <td style="padding:5px 8px">${a.customer}</td>
           <td style="padding:5px 8px;color:var(--muted)">${brandMap[a.brand] || a.brand || '—'}</td>
@@ -1942,7 +1944,8 @@ function renderPaidSummary() {
           <td style="padding:5px 8px;text-align:right;font-weight:700;color:#0a8a5f">${f(a.totalPaid || 0)}</td>
           <td style="padding:5px 8px;text-align:right;color:${a.balance > 0 ? '#c50000' : '#0a8a5f'}">${a.balance > 0 ? f(a.balance) : '—'}</td>
           <td style="padding:5px 8px;text-align:center"><span style="background:${a.payStatus === 'paid' ? 'rgba(10,138,95,0.1);color:#0a8a5f' : 'rgba(154,98,0,0.1);color:#9a6200'};padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600">${a.payStatus === 'paid' ? 'PAID' : 'PARTIAL'}</span></td>
-          <td style="padding:5px 8px;color:var(--muted)">${a.dateFullyPaid || '—'}</td>
+          <td style="padding:5px 8px;color:var(--muted)">${a.paymentDate || a.dateFullyPaid || '—'}</td>
+          <td style="padding:5px 8px;color:var(--muted)">${a.paymentMethod || '—'}</td>
         </tr>`).join('')}
       </table></div>` : '<div style="text-align:center;padding:30px;color:var(--muted)">No paid invoices found for the selected date range.</div>'}
     </div>
@@ -2185,12 +2188,16 @@ function generateDailyBriefing(today, agingHistory) {
       totalPaid: acct ? acct.totalPaid || 0 : 0,
       balance: s.balance,
       dateFullyPaid: acct ? acct.dateFullyPaid || '' : '',
+      paymentDate: acct ? acct.paymentDate || '' : '',
+      paymentMethod: acct ? acct.paymentMethod || '' : '',
       status: s.to
     });
   });
-  // Also include accounts currently paid/partial that have dateFullyPaid = yesterday
+  // Also include accounts paid/partial with paymentDate or dateFullyPaid = yesterday or today
   ACCOUNTS.forEach(a => {
-    if (a.dateFullyPaid === yesterday && !paymentsReceived.find(p => p.invoiceId === a.id)) {
+    if ((a.payStatus === 'paid' || a.payStatus === 'partial') &&
+        (a.paymentDate === yesterday || a.paymentDate === today || a.dateFullyPaid === yesterday || a.dateFullyPaid === today) &&
+        !paymentsReceived.find(p => p.invoiceId === a.id)) {
       paymentsReceived.push({
         invoiceId: a.id,
         customer: a.customer,
@@ -2199,6 +2206,8 @@ function generateDailyBriefing(today, agingHistory) {
         totalPaid: a.totalPaid || 0,
         balance: a.balance,
         dateFullyPaid: a.dateFullyPaid,
+        paymentDate: a.paymentDate || '',
+        paymentMethod: a.paymentMethod || '',
         status: a.payStatus
       });
     }
@@ -2374,14 +2383,16 @@ function generateDailyBriefing(today, agingHistory) {
         <th style="text-align:right;padding:5px 8px;font-size:11px;color:#4a5a7a">Paid</th>
         <th style="text-align:right;padding:5px 8px;font-size:11px;color:#4a5a7a">Remaining</th>
         <th style="text-align:center;padding:5px 8px;font-size:11px;color:#4a5a7a">Status</th>
+        <th style="text-align:left;padding:5px 8px;font-size:11px;color:#4a5a7a">Method</th>
       </tr>
-      ${paymentsReceived.sort((a,b) => (b.status === 'paid' ? b.totalAmount : b.totalPaid) - (a.status === 'paid' ? a.totalAmount : a.totalPaid)).map(p => `<tr style="border-bottom:1px solid #e8ecf3">
+      ${paymentsReceived.sort((a,b) => (b.totalPaid || 0) - (a.totalPaid || 0)).map(p => `<tr style="border-bottom:1px solid #e8ecf3">
         <td style="padding:5px 8px;font-family:monospace;font-size:12px">${p.invoiceId}</td>
         <td style="padding:5px 8px">${p.customer}</td>
         <td style="padding:5px 8px;color:#4a5a7a">${p.brand}</td>
-        <td style="padding:5px 8px;text-align:right;font-weight:700;color:#0a8a5f">${fmtD(p.status === 'paid' ? p.totalAmount : p.totalPaid)}</td>
+        <td style="padding:5px 8px;text-align:right;font-weight:700;color:#0a8a5f">${fmtD(p.totalPaid)}</td>
         <td style="padding:5px 8px;text-align:right;color:${p.balance > 0 ? '#c50000' : '#0a8a5f'}">${p.balance > 0 ? fmtD(p.balance) : '—'}</td>
         <td style="padding:5px 8px;text-align:center"><span style="background:${p.status === 'paid' ? 'rgba(10,138,95,0.1);color:#0a8a5f' : 'rgba(154,98,0,0.1);color:#9a6200'};padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600">${p.status === 'paid' ? 'PAID' : 'PARTIAL'}</span></td>
+        <td style="padding:5px 8px;color:#4a5a7a;font-size:11px">${p.paymentMethod || '—'}</td>
       </tr>`).join('')}
     </table>
   </div>` : `<div style="padding:20px 24px;border-bottom:1px solid #e8ecf3">
@@ -3044,12 +3055,17 @@ function parseARText(csvText) {
         const totalDue  = parseFloat(obj['Total due']    || obj['Balance due'] || 0);
         const totalPaid = parseFloat(obj['Total paid']   || 0);
         const totalAmt  = parseFloat(obj['Total amount'] || 0);
-        const dateFullyPaid = obj['Date fully paid'] || '';
+        const dateFullyPaid = normalizeDate(obj['Date fully paid'] || '');
 
         // Derive payment status from Sage data — Sage is the source of truth
         let payStatus = 'open';
         if (totalDue <= 0 && dateFullyPaid)       payStatus = 'paid';
         else if (totalPaid > 0 && totalDue > 0)   payStatus = 'partial';
+
+        // Payment detail fields from Sage
+        const paymentAmount = parseFloat(obj['Payment amount'] || 0);
+        const paymentDate   = normalizeDate(obj['Payment date'] || '');
+        const paymentMethod = (obj['Payment method'] || '').trim();
 
         // Match brand on Entity ID (reliable) with fallback to name match
         const entityId   = (obj['Created at - Entity ID']   || obj['Entity ID']   || '').trim();
@@ -3060,7 +3076,7 @@ function parseARText(csvText) {
           id:            obj['Record number']   || '',
           customer:      obj['Customer name']   || '',
           job:           obj['Job name']        || '',
-          dueDate:       obj['Due date']        || '',
+          dueDate:       normalizeDate(obj['Due date'] || ''),
           balance:       totalDue,
           totalPaid:     totalPaid,
           totalAmount:   totalAmt,
@@ -3072,7 +3088,10 @@ function parseARText(csvText) {
           jobId:         obj['Job ID'] || obj['Job'] || '',  // Sage Job ID (display/search)
           dashId:        (obj['Dash ID'] || obj['DASH ID'] || obj['Job ID'] || obj['Job'] || '').toString().trim(), // DASH match key
           dateFullyPaid: dateFullyPaid,
-          invoiceDate:   obj['Date'] || '',
+          paymentAmount: paymentAmount,
+          paymentDate:   paymentDate,
+          paymentMethod: paymentMethod,
+          invoiceDate:   normalizeDate(obj['Date'] || ''),
           arCode:        obj['AR Code']    || '',
           jobStatus:     obj['Job status'] || '',
           state:         obj['State']      || '',
@@ -4119,6 +4138,17 @@ const _fmtUSD = new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',m
 const _fmtCents = new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:2,maximumFractionDigits:2});
 function fmt(n)      { return _fmtUSD.format(n); }
 function fmtCents(n) { return _fmtCents.format(n); }
+
+// Normalize date strings to YYYY-MM-DD for consistent comparisons and sorting
+// Handles: MM/DD/YYYY, M/D/YYYY, YYYY-MM-DD (passthrough), empty strings
+function normalizeDate(d) {
+  if (!d) return '';
+  d = d.trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(d)) return d.slice(0, 10); // already YYYY-MM-DD
+  const m = d.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (m) return m[3] + '-' + m[1].padStart(2, '0') + '-' + m[2].padStart(2, '0');
+  return d; // fallback — return as-is
+}
 
 // Cache today's timestamp once per render cycle — avoids new Date() on every row
 let _renderNow = Date.now();
