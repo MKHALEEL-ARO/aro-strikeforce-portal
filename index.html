@@ -3079,6 +3079,29 @@ function parseARText(csvText) {
       const prevSnapshot = {};
       ACCOUNTS.forEach(a => { prevSnapshot[a.id] = a.balance; });
 
+      // ── Pass 1: Collect AR receipt rows into a customer → payment lookup ──
+      // Receipts have Payment method/date/amount but invoices don't.
+      // We'll enrich paid invoices from receipt data after building accounts.
+      const receiptsByCustomer = {}; // customer → [{method, amount, date}] sorted newest first
+      for (let i = 1; i < rows.length; i++) {
+        const row = rows[i];
+        const obj = {};
+        header.forEach((h, idx) => { obj[h] = (row[idx] || '').toString().trim(); });
+        if ((obj['Record type'] || '') !== 'AR receipt') continue;
+        const cust = obj['Customer name'] || '';
+        if (!cust) continue;
+        const pm = (obj['Payment method'] || '').trim();
+        const pd = normalizeDate(obj['Payment date'] || '');
+        const pa = parseFloat(obj['Payment amount'] || 0);
+        if (!receiptsByCustomer[cust]) receiptsByCustomer[cust] = [];
+        receiptsByCustomer[cust].push({ method: pm, date: pd, amount: pa });
+      }
+      // Sort each customer's receipts by date descending (newest first) and dedup
+      Object.values(receiptsByCustomer).forEach(arr => {
+        arr.sort((a, b) => b.date.localeCompare(a.date));
+      });
+
+      // ── Pass 2: Build account objects from AR invoice rows ──
       for (let i = 1; i < rows.length; i++) {
         const row = rows[i];
         const obj = {};
@@ -3098,11 +3121,6 @@ function parseARText(csvText) {
         let payStatus = 'open';
         if (totalDue <= 0 && dateFullyPaid)       payStatus = 'paid';
         else if (totalPaid > 0 && totalDue > 0)   payStatus = 'partial';
-
-        // Payment detail fields from Sage
-        const paymentAmount = parseFloat(obj['Payment amount'] || 0);
-        const paymentDate   = normalizeDate(obj['Payment date'] || '');
-        const paymentMethod = (obj['Payment method'] || '').trim();
 
         // Match brand on Entity ID (reliable) with fallback to name match
         const entityId   = (obj['Created at - Entity ID']   || obj['Entity ID']   || '').trim();
@@ -3125,9 +3143,9 @@ function parseARText(csvText) {
           jobId:         obj['Job ID'] || obj['Job'] || '',  // Sage Job ID (display/search)
           dashId:        (obj['Dash ID'] || obj['DASH ID'] || obj['Job ID'] || obj['Job'] || '').toString().trim(), // DASH match key
           dateFullyPaid: dateFullyPaid,
-          paymentAmount: paymentAmount,
-          paymentDate:   paymentDate,
-          paymentMethod: paymentMethod,
+          paymentAmount: 0,
+          paymentDate:   '',
+          paymentMethod: '',
           invoiceDate:   normalizeDate(obj['Date'] || ''),
           arCode:        obj['AR Code']    || '',
           jobStatus:     obj['Job status'] || '',
@@ -3138,6 +3156,32 @@ function parseARText(csvText) {
           payStatus:     payStatus                           // 'open' | 'partial' | 'paid'
         });
       }
+
+      // ── Pass 3: Enrich paid/partial invoices with receipt payment data ──
+      // Match by customer name; use the receipt closest in date to dateFullyPaid
+      accounts.forEach(a => {
+        if (a.payStatus !== 'paid' && a.payStatus !== 'partial') return;
+        const receipts = receiptsByCustomer[a.customer];
+        if (!receipts || !receipts.length) return;
+        // Find best match: receipt with date closest to dateFullyPaid, or newest
+        let best = receipts[0]; // default to newest
+        if (a.dateFullyPaid) {
+          // Prefer exact date match first
+          const exact = receipts.find(r => r.date === a.dateFullyPaid);
+          if (exact) best = exact;
+          else {
+            // Closest date
+            let minDiff = Infinity;
+            receipts.forEach(r => {
+              const diff = Math.abs(new Date(r.date) - new Date(a.dateFullyPaid));
+              if (diff < minDiff) { minDiff = diff; best = r; }
+            });
+          }
+        }
+        a.paymentMethod = best.method || '';
+        a.paymentDate   = best.date || a.dateFullyPaid;
+        a.paymentAmount = best.amount || 0;
+      });
 
       // Day-over-day reconciliation diff (only meaningful on reload, not first load)
       const reconSummary = buildReconDiff(prevSnapshot, accounts);
