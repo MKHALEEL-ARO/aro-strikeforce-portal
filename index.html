@@ -3817,12 +3817,19 @@ function parseARText(csvText) {
       // producing nonsensical negative balances. Sage's own Balance Due already accounts
       // for those credits; we don't need to (and must not) double-apply them here.
 
-      // Pre-count how many invoices share each customer|jobId (to detect ambiguous jobs)
+      // Pre-count how many invoices share each customer|jobId or customer|ref
+      // Used to skip ambiguous bucket matches that would spread one credit across many invoices
       const jobIdInvoiceCount = {};
+      const refInvoiceCount   = {};
       accounts.forEach(a => {
-        if (!a.jobId) return;
-        const k = a.customer + '|' + a.jobId;
-        jobIdInvoiceCount[k] = (jobIdInvoiceCount[k] || 0) + 1;
+        if (a.jobId) {
+          const k = a.customer + '|' + a.jobId;
+          jobIdInvoiceCount[k] = (jobIdInvoiceCount[k] || 0) + 1;
+        }
+        if (a.ref) {
+          const k = a.customer + '|' + a.ref;
+          refInvoiceCount[k] = (refInvoiceCount[k] || 0) + 1;
+        }
       });
 
       accounts.forEach(a => {
@@ -3831,8 +3838,12 @@ function parseARText(csvText) {
         a.netCollected = 0;      // actual cash = totalAmount + adjustments (adj are negative)
 
         const cust = a.customer;
-        const byInv = (a.inv   && adjustmentsByInvNum[cust + '|' + a.inv])   || [];
-        const byRef = (a.ref   && adjustmentsByRef   [cust + '|' + a.ref])   || [];
+        const byInv = (a.inv && adjustmentsByInvNum[cust + '|' + a.inv]) || [];
+
+        // Only use ref-level match when this is the sole invoice for this customer+ref
+        const refKey    = a.ref   ? cust + '|' + a.ref   : null;
+        const refIsUnique = refKey && (refInvoiceCount[refKey] === 1);
+        const byRef = (refIsUnique && adjustmentsByRef[refKey]) || [];
 
         // Only use job-level fallback when this is the sole invoice for this customer+job
         const jobKey = a.jobId ? cust + '|' + a.jobId : null;
