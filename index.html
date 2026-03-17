@@ -2765,6 +2765,7 @@ function generateDailyBriefing(today, agingHistory) {
       brand: s.brand,
       totalAmount: acct ? acct.totalAmount || 0 : 0,
       totalPaid: acct ? acct.totalPaid || 0 : 0,
+      netCollected: acct ? (acct.netCollected || acct.totalAmount || 0) : 0,
       balance: s.balance,
       dateFullyPaid: acct ? acct.dateFullyPaid || '' : '',
       paymentDate: acct ? acct.paymentDate || '' : '',
@@ -2783,6 +2784,7 @@ function generateDailyBriefing(today, agingHistory) {
         brand: brandMap[a.brand] || a.brand || '—',
         totalAmount: a.totalAmount || 0,
         totalPaid: a.totalPaid || 0,
+        netCollected: a.netCollected || a.totalAmount || 0,
         balance: a.balance,
         dateFullyPaid: a.dateFullyPaid,
         paymentDate: a.paymentDate || '',
@@ -2791,13 +2793,14 @@ function generateDailyBriefing(today, agingHistory) {
       });
     }
   });
-  const totalPaymentsAmt = paymentsReceived.reduce((s, p) => s + (p.status === 'paid' ? p.totalAmount : p.totalPaid), 0);
+  // Use netCollected for fully paid; totalPaid for partials (not yet fully settled)
+  const totalPaymentsAmt = paymentsReceived.reduce((s, p) => s + (p.status === 'paid' ? p.netCollected : p.totalPaid), 0);
   // Group payments by brand for summary
   const paymentsByBrand = {};
   paymentsReceived.forEach(p => {
     if (!paymentsByBrand[p.brand]) paymentsByBrand[p.brand] = { count: 0, amount: 0 };
     paymentsByBrand[p.brand].count++;
-    paymentsByBrand[p.brand].amount += (p.status === 'paid' ? p.totalAmount : p.totalPaid);
+    paymentsByBrand[p.brand].amount += (p.status === 'paid' ? p.netCollected : p.totalPaid);
   });
 
   // ── 4. Top 10 open balances ──
@@ -2959,16 +2962,16 @@ function generateDailyBriefing(today, agingHistory) {
         <th style="text-align:left;padding:5px 8px;font-size:11px;color:#4a5a7a">Invoice</th>
         <th style="text-align:left;padding:5px 8px;font-size:11px;color:#4a5a7a">Customer</th>
         <th style="text-align:left;padding:5px 8px;font-size:11px;color:#4a5a7a">Brand</th>
-        <th style="text-align:right;padding:5px 8px;font-size:11px;color:#4a5a7a">Paid</th>
+        <th style="text-align:right;padding:5px 8px;font-size:11px;color:#4a5a7a">Net Collected</th>
         <th style="text-align:right;padding:5px 8px;font-size:11px;color:#4a5a7a">Remaining</th>
         <th style="text-align:center;padding:5px 8px;font-size:11px;color:#4a5a7a">Status</th>
         <th style="text-align:left;padding:5px 8px;font-size:11px;color:#4a5a7a">Method</th>
       </tr>
-      ${paymentsReceived.sort((a,b) => (b.totalPaid || 0) - (a.totalPaid || 0)).map(p => `<tr style="border-bottom:1px solid #e8ecf3">
+      ${paymentsReceived.sort((a,b) => (b.netCollected || b.totalPaid || 0) - (a.netCollected || a.totalPaid || 0)).map(p => `<tr style="border-bottom:1px solid #e8ecf3">
         <td style="padding:5px 8px;font-family:monospace;font-size:12px">${p.invoiceId}</td>
         <td style="padding:5px 8px">${p.customer}</td>
         <td style="padding:5px 8px;color:#4a5a7a">${p.brand}</td>
-        <td style="padding:5px 8px;text-align:right;font-weight:700;color:#0a8a5f">${fmtD(p.totalPaid)}</td>
+        <td style="padding:5px 8px;text-align:right;font-weight:700;color:#0a8a5f">${fmtD(p.status === 'paid' ? p.netCollected : p.totalPaid)}</td>
         <td style="padding:5px 8px;text-align:right;color:${p.balance > 0 ? '#c50000' : '#0a8a5f'}">${p.balance > 0 ? fmtD(p.balance) : '—'}</td>
         <td style="padding:5px 8px;text-align:center"><span style="background:${p.status === 'paid' ? 'rgba(10,138,95,0.1);color:#0a8a5f' : 'rgba(154,98,0,0.1);color:#9a6200'};padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600">${p.status === 'paid' ? 'PAID' : 'PARTIAL'}</span></td>
         <td style="padding:5px 8px;color:#4a5a7a;font-size:11px">${p.paymentMethod || '—'}</td>
