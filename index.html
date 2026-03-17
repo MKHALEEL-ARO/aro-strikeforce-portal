@@ -3903,6 +3903,29 @@ function parseARText(csvText) {
 
       DataLayer.setAR(accounts);
       ACCOUNTS = accounts;
+
+      // ── DEBUG: log parsed data for any invoice matching known problem IDs ──
+      const _debugIds = ['596091'];
+      _debugIds.forEach(debugId => {
+        const _da = accounts.find(a => a.id === debugId);
+        if (_da) {
+          console.group(`[ARO DEBUG] Invoice ${debugId} — ${_da.customer}`);
+          console.log('totalAmount:',    _da.totalAmount);
+          console.log('totalPaid:',      _da.totalPaid);
+          console.log('balance:',        _da.balance);
+          console.log('payStatus:',      _da.payStatus);
+          console.log('totalAdjustments:', _da.totalAdjustments);
+          console.log('netCollected:',   _da.netCollected);
+          console.log('paymentMethod:',  _da.paymentMethod);
+          console.log('paymentAmount:',  _da.paymentAmount);
+          console.log('paymentDate:',    _da.paymentDate);
+          console.log('ref:',            _da.ref);
+          console.log('jobId:',          _da.jobId);
+          console.log('inv:',            _da.inv);
+          console.log('adjustments:',    _da.adjustments);
+          console.groupEnd();
+        }
+      });
       document.getElementById('csv-import-banner').style.display = 'none';
       document.getElementById('csv-reload-link').style.display = 'flex';
       document.getElementById('dash-import-bar').style.display = 'flex';
