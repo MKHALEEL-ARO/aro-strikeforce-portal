@@ -3815,9 +3815,23 @@ function parseARText(csvText) {
             });
           }
         }
-        a.paymentMethod = best.method || '';
-        a.paymentDate   = best.date || a.dateFullyPaid;
-        a.paymentAmount = best.amount || 0;
+        // Sanity check: if the matched receipt is more than 2× the invoice amount it is
+        // almost certainly a bulk/combined payment covering multiple invoices, not this
+        // one specifically. Attaching it produces a wildly wrong paymentAmount and
+        // causes the paymentDate to bleed onto invoices it doesn't belong to.
+        // In that case leave paymentMethod/Date/Amount blank — the balance and
+        // netCollected fallback (totalPaid) will still reflect the correct amounts.
+        const receiptIsOversized = best.amount > 0 && a.totalAmount > 0 &&
+                                   best.amount > a.totalAmount * 2;
+        if (receiptIsOversized) {
+          a.paymentMethod = '';
+          a.paymentDate   = a.dateFullyPaid || '';
+          a.paymentAmount = 0;
+        } else {
+          a.paymentMethod = best.method || '';
+          a.paymentDate   = best.date || a.dateFullyPaid;
+          a.paymentAmount = best.amount || 0;
+        }
       });
 
       // ── Pass 4: Link adjustments to accounts, compute netCollected ──
@@ -3961,33 +3975,6 @@ function parseARText(csvText) {
 
       DataLayer.setAR(accounts);
       ACCOUNTS = accounts;
-
-      // ── DEBUG: log parsed data for problem invoices ──
-      ['258343'].forEach(debugId => {
-        const _da = accounts.find(a => a.id === debugId);
-        if (_da) {
-          console.group(`[ARO DEBUG] Invoice ${debugId} — ${_da.customer}`);
-          console.log('id (Record #):',  _da.id);
-          console.log('inv (Invoice #):', _da.inv);
-          console.log('customer:',        _da.customer);
-          console.log('brand:',           _da.brand);
-          console.log('totalAmount:',     _da.totalAmount);
-          console.log('totalPaid:',       _da.totalPaid);
-          console.log('balance:',         _da.balance);
-          console.log('payStatus:',       _da.payStatus);
-          console.log('netCollected:',    _da.netCollected);
-          console.log('paymentMethod:',   _da.paymentMethod);
-          console.log('paymentAmount:',   _da.paymentAmount);
-          console.log('paymentDate:',     _da.paymentDate);
-          console.log('dateFullyPaid:',   _da.dateFullyPaid);
-          console.log('ref:',             _da.ref);
-          console.log('jobId:',           _da.jobId);
-          console.log('adjustments:',     _da.adjustments);
-          console.groupEnd();
-        } else {
-          console.warn(`[ARO DEBUG] Invoice ${debugId} NOT FOUND in parsed accounts (${accounts.length} total). Check if it came from cache.`);
-        }
-      });
 
       document.getElementById('csv-import-banner').style.display = 'none';
       document.getElementById('csv-reload-link').style.display = 'flex';
