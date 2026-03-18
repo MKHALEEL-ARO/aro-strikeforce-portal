@@ -3962,6 +3962,33 @@ function parseARText(csvText) {
       DataLayer.setAR(accounts);
       ACCOUNTS = accounts;
 
+      // ── DEBUG: log parsed data for problem invoices ──
+      ['258343'].forEach(debugId => {
+        const _da = accounts.find(a => a.id === debugId);
+        if (_da) {
+          console.group(`[ARO DEBUG] Invoice ${debugId} — ${_da.customer}`);
+          console.log('id (Record #):',  _da.id);
+          console.log('inv (Invoice #):', _da.inv);
+          console.log('customer:',        _da.customer);
+          console.log('brand:',           _da.brand);
+          console.log('totalAmount:',     _da.totalAmount);
+          console.log('totalPaid:',       _da.totalPaid);
+          console.log('balance:',         _da.balance);
+          console.log('payStatus:',       _da.payStatus);
+          console.log('netCollected:',    _da.netCollected);
+          console.log('paymentMethod:',   _da.paymentMethod);
+          console.log('paymentAmount:',   _da.paymentAmount);
+          console.log('paymentDate:',     _da.paymentDate);
+          console.log('dateFullyPaid:',   _da.dateFullyPaid);
+          console.log('ref:',             _da.ref);
+          console.log('jobId:',           _da.jobId);
+          console.log('adjustments:',     _da.adjustments);
+          console.groupEnd();
+        } else {
+          console.warn(`[ARO DEBUG] Invoice ${debugId} NOT FOUND in parsed accounts (${accounts.length} total). Check if it came from cache.`);
+        }
+      });
+
       document.getElementById('csv-import-banner').style.display = 'none';
       document.getElementById('csv-reload-link').style.display = 'flex';
       document.getElementById('dash-import-bar').style.display = 'flex';
