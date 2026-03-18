@@ -3848,6 +3848,50 @@ function parseARText(csvText) {
         }
       });
 
+      // Build invoice groups for gap matching (needed when ambiguity guard blocks direct linking)
+      const invoicesByRef   = {};
+      const invoicesByJobId = {};
+      accounts.forEach(a => {
+        if (a.ref) {
+          const k = a.customer + '|' + a.ref;
+          if (!invoicesByRef[k]) invoicesByRef[k] = [];
+          invoicesByRef[k].push(a);
+        }
+        if (a.jobId) {
+          const k = a.customer + '|' + a.jobId;
+          if (!invoicesByJobId[k]) invoicesByJobId[k] = [];
+          invoicesByJobId[k].push(a);
+        }
+      });
+
+      // ── Gap matching helper ──
+      // When multiple invoices share a ref or jobId the standard ambiguity guard blocks
+      // adjustment linking to prevent cross-contamination. Gap matching recovers real AR
+      // records by finding adjustments whose amount uniquely explains the gap between
+      // this invoice's totalAmount and the cash actually received (paymentAmount, Pass 3).
+      //
+      // Safety rules:
+      //   1. Requires a real receipt (paymentAmount > 0) — no guessing on unpaid invoices
+      //   2. Adjustment must match the gap within $0.02 (floating-point tolerance)
+      //   3. No other invoice in the group may have the same gap — guarantees uniqueness
+      //      and prevents the same adjustment being assigned to multiple invoices
+      const _gapMatchAdjs = (candidates, invoice, groupInvoices) => {
+        if (!candidates || !candidates.length) return [];
+        if (!(invoice.paymentAmount > 0)) return [];          // need real receipt to define gap
+        const gap = invoice.totalAmount - invoice.paymentAmount;
+        if (gap < 0.01) return [];                            // fully paid at face value, no gap
+        // Find adjustments whose absolute value matches the gap within 2 cents
+        const matched = candidates.filter(adj => Math.abs(Math.abs(adj.amount) - gap) < 0.02);
+        if (!matched.length) return [];
+        // Uniqueness: reject if any OTHER invoice in the group has the same gap
+        const conflict = groupInvoices.some(other => {
+          if (other.id === invoice.id) return false;
+          if (!(other.paymentAmount > 0)) return false;
+          return Math.abs((other.totalAmount - other.paymentAmount) - gap) < 0.02;
+        });
+        return conflict ? [] : matched;
+      };
+
       accounts.forEach(a => {
         a.adjustments = [];      // [{type, amount, date, desc, recNum, invNum}]
         a.totalAdjustments = 0;  // sum of adjustment amounts (usually negative)
@@ -3856,15 +3900,19 @@ function parseARText(csvText) {
         const cust = a.customer;
         const byInv = (a.inv && adjustmentsByInvNum[cust + '|' + a.inv]) || [];
 
-        // Only use ref-level match when this is the sole invoice for this customer+ref
-        const refKey    = a.ref   ? cust + '|' + a.ref   : null;
+        // Ref bucket: direct match when unique; gap matching when shared
+        const refKey      = a.ref ? cust + '|' + a.ref : null;
         const refIsUnique = refKey && (refInvoiceCount[refKey] === 1);
-        const byRef = (refIsUnique && adjustmentsByRef[refKey]) || [];
+        const byRef = refIsUnique
+          ? (adjustmentsByRef[refKey] || [])
+          : _gapMatchAdjs(adjustmentsByRef[refKey] || [], a, invoicesByRef[refKey] || []);
 
-        // Only use job-level fallback when this is the sole invoice for this customer+job
-        const jobKey = a.jobId ? cust + '|' + a.jobId : null;
+        // Job bucket: direct match when unique; gap matching when shared
+        const jobKey      = a.jobId ? cust + '|' + a.jobId : null;
         const jobIsUnique = jobKey && (jobIdInvoiceCount[jobKey] === 1);
-        const byJob = (jobIsUnique && adjustmentsByJobId[jobKey]) || [];
+        const byJob = jobIsUnique
+          ? (adjustmentsByJobId[jobKey] || [])
+          : _gapMatchAdjs(adjustmentsByJobId[jobKey] || [], a, invoicesByJobId[jobKey] || []);
 
         // Union all applicable buckets, deduplicate by record number
         const seen = new Set();
