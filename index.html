@@ -3890,10 +3890,13 @@ function parseARText(csvText) {
         if (a.totalAdjustments === 0 && a.payStatus === 'paid') {
           if (a.paymentAmount > 0 && a.paymentAmount < a.totalAmount) {
             // paymentAmount is the actual receipt (e.g. $58,550 EFT)
-            a.netCollected = a.paymentAmount;
+            // Back-fill implied adjustment so Adjustments column reflects the write-off
+            a.netCollected     = a.paymentAmount;
+            a.totalAdjustments = a.paymentAmount - a.totalAmount; // e.g. -$13,860
           } else if (a.totalPaid > 0 && a.totalPaid < a.totalAmount) {
             // secondary fallback: Sage's Total paid field
-            a.netCollected = a.totalPaid;
+            a.netCollected     = a.totalPaid;
+            a.totalAdjustments = a.totalPaid - a.totalAmount;
           }
         }
       });
