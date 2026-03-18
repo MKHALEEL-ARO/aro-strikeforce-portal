@@ -4000,20 +4000,28 @@ function parseARText(csvText) {
         // netCollected = original amount minus what was adjusted/credited away
         a.netCollected = a.totalAmount + a.totalAdjustments;
 
-        // Fallback for fully-paid invoices where adjustment linking was blocked:
-        // Sage's 'Total paid' can equal 'Total amount' when Record Transfers cover
-        // the remaining balance (making totalPaid an unreliable floor).
-        // Pass 3 sets paymentAmount from the actual AR receipt row — this is the
-        // real cash received. Use it when no adjustments were linked and it's less
-        // than the invoice amount.
-        if (a.totalAdjustments === 0 && a.payStatus === 'paid') {
-          if (a.paymentAmount > 0 && a.paymentAmount < a.totalAmount) {
-            // paymentAmount is the actual receipt (e.g. $58,550 EFT)
-            // Back-fill implied adjustment so Adjustments column reflects the write-off
-            a.netCollected     = a.paymentAmount;
+        // When Pass 3 matched a specific AR receipt to this invoice, that receipt
+        // is the authoritative source for actual cash received.  Use it directly
+        // as netCollected regardless of whether it is above or below the invoice
+        // amount — progress-billing arrangements (e.g. fixed $15k/month payments)
+        // routinely produce receipts that differ from individual invoice amounts.
+        //
+        // Back-fill an implied write-off adjustment ONLY when the receipt is less
+        // than the invoice AND no real ARADJ records were linked — so the
+        // Adjustments column shows the shortfall rather than "—".
+        //
+        // Do NOT back-fill when receipt > invoice (overpayment): the excess cash
+        // isn't an adjustment; leaving the column as "—" is cleaner.
+        if (a.paymentAmount > 0) {
+          a.netCollected = a.paymentAmount;
+          if (a.totalAdjustments === 0 && a.paymentAmount < a.totalAmount) {
             a.totalAdjustments = a.paymentAmount - a.totalAmount; // e.g. -$13,860
-          } else if (a.totalPaid > 0 && a.totalPaid < a.totalAmount) {
-            // secondary fallback: Sage's Total paid field
+          }
+        } else if (a.totalAdjustments === 0 && a.payStatus === 'paid') {
+          // No receipt was attached (none available or all consumed by other invoices).
+          // Fall back to Sage's own 'Total paid' field when it's a reliable floor
+          // (i.e. less than the invoice amount, ruling out Record Transfer inflation).
+          if (a.totalPaid > 0 && a.totalPaid < a.totalAmount) {
             a.netCollected     = a.totalPaid;
             a.totalAdjustments = a.totalPaid - a.totalAmount;
           }
