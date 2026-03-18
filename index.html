@@ -3782,56 +3782,100 @@ function parseARText(csvText) {
       }
 
       // ── Pass 3: Enrich paid/partial invoices with receipt payment data ──
-      // Match by customer name; use the receipt closest in date to dateFullyPaid
-      // Also flag invoices where ALL matching receipts are "Record transfer"
+      // 1-to-1 greedy matching: each AR receipt is consumed by AT MOST one invoice.
+      // This prevents a single bulk or multi-invoice receipt from being attached to
+      // every invoice for a customer, which would inflate per-invoice netCollected
+      // above the true cash received per the AR transaction summary.
+      //
+      // Algorithm:
+      //   1. Group paid/partial invoices by customer.
+      //   2. For each customer, build a scored candidate list of (invoice, receipt) pairs.
+      //      Oversized receipts (> 2× invoice amount) are excluded as bulk payments.
+      //   3. Sort candidates: date proximity first (|receipt.date − invoice.dateFullyPaid|),
+      //      then amount proximity (|receipt.amount − invoice.totalAmount|) as tiebreak.
+      //   4. Greedily assign best-scoring pairs; mark both invoice and receipt as used.
+      //   5. Invoices left without a receipt get paymentAmount = 0 (gap matching in Pass 4
+      //      will fall back to totalPaid if available).
+
+      // Initialise payment fields for all accounts before assignment
       accounts.forEach(a => {
-        a.isRecordTransfer = false; // default
+        a.isRecordTransfer = false;
+        a.paymentMethod    = '';
+        a.paymentDate      = '';
+        a.paymentAmount    = 0;
+      });
+
+      // Group paid/partial invoices by customer
+      const paidInvoicesByCustomer = {};
+      accounts.forEach(a => {
         if (a.payStatus !== 'paid' && a.payStatus !== 'partial') return;
-        const receipts = receiptsByCustomer[a.customer];
+        if (!paidInvoicesByCustomer[a.customer]) paidInvoicesByCustomer[a.customer] = [];
+        paidInvoicesByCustomer[a.customer].push(a);
+      });
+
+      Object.keys(paidInvoicesByCustomer).forEach(custName => {
+        const invoices = paidInvoicesByCustomer[custName];
+        const receipts = receiptsByCustomer[custName];
         if (!receipts || !receipts.length) return;
 
-        // Check if ALL receipts for this customer are Record Transfer
+        // ── Record Transfer flag (per-invoice, same logic as before) ──
         const allRT = receipts.every(r => r.method.toLowerCase() === 'record transfer');
-        // Also check receipts near the paid date specifically
-        const nearDateReceipts = a.dateFullyPaid
-          ? receipts.filter(r => r.date === a.dateFullyPaid)
-          : [];
-        const nearAllRT = nearDateReceipts.length > 0
-          ? nearDateReceipts.every(r => r.method.toLowerCase() === 'record transfer')
-          : false;
-        // Flag as Record Transfer if ALL receipts are RT, or all receipts on the paid date are RT
-        a.isRecordTransfer = allRT || nearAllRT;
+        invoices.forEach(a => {
+          const nearDateReceipts = a.dateFullyPaid
+            ? receipts.filter(r => r.date === a.dateFullyPaid)
+            : [];
+          const nearAllRT = nearDateReceipts.length > 0
+            ? nearDateReceipts.every(r => r.method.toLowerCase() === 'record transfer')
+            : false;
+          a.isRecordTransfer = allRT || nearAllRT;
+        });
 
-        // Find best match: receipt with date closest to dateFullyPaid, or newest
-        let best = receipts[0]; // default to newest
-        if (a.dateFullyPaid) {
-          const exact = receipts.find(r => r.date === a.dateFullyPaid);
-          if (exact) best = exact;
-          else {
-            let minDiff = Infinity;
-            receipts.forEach(r => {
-              const diff = Math.abs(new Date(r.date) - new Date(a.dateFullyPaid));
-              if (diff < minDiff) { minDiff = diff; best = r; }
-            });
+        // ── Build scored candidate pairs ──
+        const candidates = [];
+        invoices.forEach((inv, iIdx) => {
+          receipts.forEach((rec, rIdx) => {
+            // Exclude oversized receipts — they are bulk/combined payments
+            if (rec.amount > 0 && inv.totalAmount > 0 && rec.amount > inv.totalAmount * 2) return;
+
+            // Date distance in days between receipt date and invoice fully-paid date
+            let dateDiff = Infinity;
+            if (inv.dateFullyPaid && rec.date) {
+              dateDiff = Math.abs(new Date(rec.date) - new Date(inv.dateFullyPaid)) / 86400000;
+            } else if (rec.date) {
+              dateDiff = 9999; // receipt has a date but invoice has none — deprioritise
+            }
+
+            // Amount distance between receipt and invoice face value
+            const amtDiff = Math.abs(rec.amount - inv.totalAmount);
+
+            candidates.push({ iIdx, rIdx, dateDiff, amtDiff, inv, rec });
+          });
+        });
+
+        // Sort: closest date first; break ties by closest amount
+        candidates.sort((x, y) => {
+          if (x.dateDiff !== y.dateDiff) return x.dateDiff - y.dateDiff;
+          return x.amtDiff - y.amtDiff;
+        });
+
+        // ── Greedy 1-to-1 assignment ──
+        const usedInvoice = new Set();
+        const usedReceipt = new Set();
+        candidates.forEach(({ iIdx, rIdx, inv, rec }) => {
+          if (usedInvoice.has(iIdx) || usedReceipt.has(rIdx)) return;
+          usedInvoice.add(iIdx);
+          usedReceipt.add(rIdx);
+          inv.paymentMethod = rec.method || '';
+          inv.paymentDate   = rec.date   || inv.dateFullyPaid;
+          inv.paymentAmount = rec.amount || 0;
+        });
+
+        // Invoices that didn't receive a receipt: preserve dateFullyPaid for display
+        invoices.forEach((inv, iIdx) => {
+          if (!usedInvoice.has(iIdx)) {
+            inv.paymentDate = inv.dateFullyPaid || '';
           }
-        }
-        // Sanity check: if the matched receipt is more than 2× the invoice amount it is
-        // almost certainly a bulk/combined payment covering multiple invoices, not this
-        // one specifically. Attaching it produces a wildly wrong paymentAmount and
-        // causes the paymentDate to bleed onto invoices it doesn't belong to.
-        // In that case leave paymentMethod/Date/Amount blank — the balance and
-        // netCollected fallback (totalPaid) will still reflect the correct amounts.
-        const receiptIsOversized = best.amount > 0 && a.totalAmount > 0 &&
-                                   best.amount > a.totalAmount * 2;
-        if (receiptIsOversized) {
-          a.paymentMethod = '';
-          a.paymentDate   = a.dateFullyPaid || '';
-          a.paymentAmount = 0;
-        } else {
-          a.paymentMethod = best.method || '';
-          a.paymentDate   = best.date || a.dateFullyPaid;
-          a.paymentAmount = best.amount || 0;
-        }
+        });
       });
 
       // ── Pass 4: Link adjustments to accounts, compute netCollected ──
@@ -3891,17 +3935,30 @@ function parseARText(csvText) {
       //      and prevents the same adjustment being assigned to multiple invoices
       const _gapMatchAdjs = (candidates, invoice, groupInvoices) => {
         if (!candidates || !candidates.length) return [];
-        if (!(invoice.paymentAmount > 0)) return [];          // need real receipt to define gap
-        const gap = invoice.totalAmount - invoice.paymentAmount;
+        // Primary cash reference: AR receipt attached in Pass 3 (most accurate).
+        // Fallback: Sage's own 'Total paid' field when no receipt was matched (e.g.
+        // after 1-to-1 assignment left this invoice without a dedicated receipt).
+        // If totalPaid > totalAmount (Sage inflates with Record Transfers) ignore it.
+        const cashRef = invoice.paymentAmount > 0
+          ? invoice.paymentAmount
+          : (invoice.totalPaid > 0 && invoice.totalPaid < invoice.totalAmount
+              ? invoice.totalPaid
+              : 0);
+        if (!(cashRef > 0)) return [];                        // no cash reference — can't compute gap
+        const gap = invoice.totalAmount - cashRef;
         if (gap < 0.01) return [];                            // fully paid at face value, no gap
         // Find adjustments whose absolute value matches the gap within 2 cents
         const matched = candidates.filter(adj => Math.abs(Math.abs(adj.amount) - gap) < 0.02);
         if (!matched.length) return [];
         // Uniqueness: reject if any OTHER invoice in the group has the same gap
+        // (use same cashRef logic for sibling invoices)
         const conflict = groupInvoices.some(other => {
           if (other.id === invoice.id) return false;
-          if (!(other.paymentAmount > 0)) return false;
-          return Math.abs((other.totalAmount - other.paymentAmount) - gap) < 0.02;
+          const otherCash = other.paymentAmount > 0
+            ? other.paymentAmount
+            : (other.totalPaid > 0 && other.totalPaid < other.totalAmount ? other.totalPaid : 0);
+          if (!(otherCash > 0)) return false;
+          return Math.abs((other.totalAmount - otherCash) - gap) < 0.02;
         });
         return conflict ? [] : matched;
       };
