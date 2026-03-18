@@ -2093,6 +2093,7 @@ function renderPaidSummary() {
           <th style="text-align:left;padding:8px 8px;font-size:11px;color:#d4890a;text-transform:uppercase;letter-spacing:1px">Customer</th>
           <th style="text-align:left;padding:8px 8px;font-size:11px;color:#d4890a;text-transform:uppercase;letter-spacing:1px">Brand</th>
           <th style="text-align:left;padding:8px 8px;font-size:11px;color:#d4890a;text-transform:uppercase;letter-spacing:1px">Job ID</th>
+          <th style="text-align:center;padding:8px 8px;font-size:11px;color:#d4890a;text-transform:uppercase;letter-spacing:1px">Age</th>
           <th style="text-align:right;padding:8px 8px;font-size:11px;color:#d4890a;text-transform:uppercase;letter-spacing:1px">Invoice Amt</th>
           <th style="text-align:right;padding:8px 8px;font-size:11px;color:#d4890a;text-transform:uppercase;letter-spacing:1px">Adjustments</th>
           <th style="text-align:right;padding:8px 8px;font-size:11px;color:#d4890a;text-transform:uppercase;letter-spacing:1px">Net Collected</th>
@@ -2111,6 +2112,7 @@ function renderPaidSummary() {
           <td style="padding:5px 8px">${a.customer}</td>
           <td style="padding:5px 8px;color:var(--muted)">${brandMap[a.brand] || a.brand || '—'}</td>
           <td style="padding:5px 8px;font-size:11px;color:var(--muted);font-family:monospace">${a.jobId || '—'}</td>
+          <td style="padding:5px 8px;text-align:center"><span class="age-badge ${a._ageCls || ''}">${a._ageLbl || '—'}</span></td>
           <td style="padding:5px 8px;text-align:right">${f(a.totalAmount || 0)}</td>
           <td style="padding:5px 8px;text-align:right;color:${adj < 0 ? '#c50000' : adj > 0 ? '#0a8a5f' : 'var(--muted)'};font-weight:${adj !== 0 ? '600' : '400'}">${adj !== 0 ? f(adj) : '—'}</td>
           <td style="padding:5px 8px;text-align:right;font-weight:700;color:#0a8a5f">${f(net)}</td>
