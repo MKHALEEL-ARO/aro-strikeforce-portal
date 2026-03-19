@@ -1796,13 +1796,13 @@ async function blobSyncNotes() {
   await blobUpload('portal_notes.json', payload);
 }
 
-// ── Live note polling — checks blob every 60s for changes from other users ──
+// ── Live note polling — checks blob every 20s for changes from other users ──
 const _noteSync = {
   interval: null,
   lastExportedAt: null,
   idleTimeout: null,
   idleMs: 10 * 60 * 1000,   // pause after 10 min idle
-  pollMs: 60 * 1000,         // check every 60 seconds
+  pollMs: 20 * 1000,         // check every 20 seconds
   paused: false,
 };
 
@@ -1856,10 +1856,9 @@ async function _pollNotes() {
     _noteSync.lastExportedAt = remoteTs;
     const remoteNotes = data.notes || data || {};
     const merged = mergeNotes(NOTES, remoteNotes);
-    // Quick check: did anything actually change?
-    const oldCount = Object.values(NOTES).reduce((s, arr) => s + arr.length, 0);
-    const newCount = Object.values(merged).reduce((s, arr) => s + arr.length, 0);
-    if (newCount === oldCount) { NOTES = merged; return; } // same count, silent update
+    // We already confirmed the remote timestamp is newer — always apply and re-render.
+    // The old count-comparison guard was suppressing legitimate updates (e.g. a note
+    // edited or a delete+add that left the total count unchanged).
     NOTES = merged;
     DataLayer.saveNotes(NOTES);
     _acctCacheStamp = 0; // invalidate account cache
