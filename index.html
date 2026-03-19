@@ -1091,9 +1091,17 @@ const DataLayer = {
   getNotes() {
     try { return JSON.parse(localStorage.getItem('aro_notes_v1') || '{}'); } catch(e) { return {}; }
   },
+  // saveNotesLocal — write to localStorage ONLY (no blob upload).
+  // Use this when syncing notes received from the blob (polling, initial load).
+  // Prevents write-back race conditions where a polling overwrite could silently
+  // erase another user's note that was saved after our local merge snapshot.
+  saveNotesLocal(notes) {
+    try { localStorage.setItem('aro_notes_v1', JSON.stringify(notes)); } catch(e) {}
+  },
   saveNotes(notes) {
     try { localStorage.setItem('aro_notes_v1', JSON.stringify(notes)); } catch(e) {}
-    // Async write to Azure Blob (primary sync — fire-and-forget)
+    // Async write to Azure Blob (primary sync — fire-and-forget).
+    // Only call this when a user actively creates, edits, or deletes a note.
     if (typeof blobSyncNotes === 'function' && typeof BLOB_SAS_URL !== 'undefined' && BLOB_SAS_URL) {
       blobSyncNotes().catch(e => console.warn('Azure note sync failed:', e));
     }
@@ -1857,10 +1865,11 @@ async function _pollNotes() {
     const remoteNotes = data.notes || data || {};
     const merged = mergeNotes(NOTES, remoteNotes);
     // We already confirmed the remote timestamp is newer — always apply and re-render.
-    // The old count-comparison guard was suppressing legitimate updates (e.g. a note
-    // edited or a delete+add that left the total count unchanged).
+    // Use saveNotesLocal (localStorage only) — do NOT write back to blob here.
+    // Writing back to blob from a poll would race with other users' active saves
+    // and could overwrite a note that was added after our merge snapshot was taken.
     NOTES = merged;
-    DataLayer.saveNotes(NOTES);
+    DataLayer.saveNotesLocal(NOTES);
     _acctCacheStamp = 0; // invalidate account cache
     // Refresh current view if on accounts or leaderboard
     const activePage = document.querySelector('.page.active');
@@ -3247,7 +3256,7 @@ async function loadFromAzureBlob() {
       const localNotes  = DataLayer.getNotes();
       const merged = mergeNotes(localNotes, remoteNotes);
       NOTES = merged;
-      DataLayer.saveNotes(NOTES);
+      DataLayer.saveNotesLocal(NOTES); // read-only from blob's perspective — no write-back
       _noteSync.lastExportedAt = remoteData.exportedAt || '';
     } catch(e) {
       NOTES = DataLayer.getNotes();
