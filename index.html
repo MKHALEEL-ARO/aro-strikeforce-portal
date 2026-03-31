@@ -4880,8 +4880,18 @@ function renderLeaderboard(){
     const portalNotes = noteList.filter(n => n.source === 'portal');
     if (portalNotes.length === 0) return;
 
-    // Check that payment date falls within campaign window
-    const payDate = normalizeDate(acct.dateFullyPaid || acct.paymentDate || '');
+    // Check that payment date falls within campaign window.
+    // Sage doesn't always populate 'Date fully paid' for invoices closed via
+    // balance adjustments or multi-payment scenarios — payStatus can be 'paid'
+    // with both date fields blank. In that case fall back to the most recent
+    // portal note date as a proxy: if the collector logged a note during the
+    // campaign and the account is now paid, that note date is the best signal
+    // for when the collection happened.
+    let payDate = normalizeDate(acct.dateFullyPaid || acct.paymentDate || '');
+    if (!payDate) {
+      const lastNoteDate = normalizeDate(portalNotes[portalNotes.length - 1].date || '');
+      payDate = lastNoteDate;
+    }
     if (!payDate || payDate < campaignStart) return;
     if (campaignEnd && payDate > campaignEnd) return;
 
@@ -4983,7 +4993,11 @@ function toggleLBDetail(collectorName, rowEl) {
     let bonusEarned = '';
     let bonusAmt = 0;
     if (acct && (acct.payStatus === 'paid' || acct.payStatus === 'partial') && !acct.isRecordTransfer) {
-      const payDate = normalizeDate(acct.dateFullyPaid || acct.paymentDate || '');
+      let payDate = normalizeDate(acct.dateFullyPaid || acct.paymentDate || '');
+      // Same fallback as leaderboard Pass 2: use last collector note date when Sage date is blank
+      if (!payDate && byCollector.length > 0) {
+        payDate = normalizeDate(byCollector[byCollector.length - 1].date || '');
+      }
       const hasCampaignNote = byCollector.some(n => n.source === 'portal' && normalizeDate(n.date) >= campaignStart);
       if (payDate && payDate >= campaignStart && (!campaignEnd || payDate <= campaignEnd) && hasCampaignNote) {
         const d = daysAged(acct.dueDate);
